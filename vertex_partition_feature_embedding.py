@@ -1,18 +1,26 @@
+#general imports
+from typing import List, Optional, Tuple, Union
+import os
+import os.path as osp
+import json #to implement saving and loading the properties of datasets without having to run the computation multiple times
+
+#pytorch, pytorch geometric
 import torch
 from torch import Tensor
 
 from torch_geometric.datasets import TUDataset
-from torch_geometric.data import Data
+from torch_geometric.data import Data, Dataset
 import torch_geometric.utils
-import os.path as osp
-import networkx as nx
-import matplotlib.pyplot as plt
 
-import developmentHelpers as helpers
-
-#import for r_s_ring_subgraph
-from typing import List, Optional, Tuple, Union
+#import for the r_s_ring_subgraph implementation
 from torch_geometric.utils.num_nodes import maybe_num_nodes
+
+#import own functionality
+import developmentHelpers as helpers
+#import SP_features as spf
+
+#imports to be removed later
+import matplotlib.pyplot as plt
 
 #adaptation of the torch_geometric.utils.k_hop_subgraph method for r-s-Rings
 #NOTE: this implementation only works for undirected graphs unlike the initial implementation of k_hop_subgraph
@@ -114,24 +122,94 @@ def gen_r_s_ring(r: int, s: int, graph_data: Data, vertex: int) -> Data:
     _subset, _edge_index, _, _ = r_s_ring_subgraph(node_idx=vertex, r=r, s=s, edge_index=graph_data.__getitem__('edge_index'), relabel_nodes=True)
     return Data(x=graph_data.__getitem__('x')[_subset], edge_index=_edge_index)
 
+
+
+#classes that includes generator functionality for features that can be clustered
+
+class K_Disk_SP_Feature_Generator():
+
+    #dataset: The dataset of which the features should be generated, k: the k-value for the k-disk generation, 
+    #properties_path: if set specifies path of a json file including the dataset properties such that they do not need to be computed again, 
+    #write_properties_path: if set specifies the path to which computed properties are saved in a json file; this path is recommended to coincide with the path, the dataset is saved to
+    #write_properties_filename: if specified set the filename for the properties json file
+    def __init__(self, dataset: Dataset, k: int, properties_path: Optional[str] = None, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None):
+        super().__init__()
+
+        #sanity checks
+        assert k > 0
+
+        properties = {}
+
+        if properties_path is None:
+            assert write_properties_filename is not None
+
+            #compute dataset properties => number of vertices, label alphabet, distances alphabet (maximum diameter of a k-disk given by 2*k + 1), graph sizes
+
+
+            #test values
+            properties["num_vertices"] = 200
+            properties["label_alphabet"] = [0,2,4,5,6,7,8,9,10,11]
+            properties["distances_alphabet"] = list(range(2*k + 1))
+            properties["graph_sizes"] = [10,20,14,55,3,4,1]
+
+            #if write_properties_path is specified, save properties as a json file on disk
+            if write_properties_root_path is not None:
+                if not osp.exists(write_properties_root_path):
+                    os.makedirs(write_properties_root_path)
+
+                p = osp.join(write_properties_root_path, write_properties_filename)
+                if not osp.exists(p):
+                    open(p, 'w').close()  
+
+                with open(p, "w") as file:
+                    file.write(json.dumps(properties, indent=4))
+        else:
+            #read properties file
+            if not osp.exists(properties_path):
+                raise FileNotFoundError
+            else:
+                with open(properties_path, "r") as file:
+                    properties = json.loads(file.read())
+
+        assert "num_vertices" in properties and "label_alphabet" in properties and "distances_alphabet" in properties and "graph_sizes" in properties
+        #create graph features object
+        #self.sp_features = spf.SP_graph_features()
+
+    #generate SP features from k-Disks of all vertices and store them on disk
+    #TODO: Implement multi-threading
+    def generate_k_disk_SP_features(self):
+
+        raise NotImplementedError
+    
+
+    def save_k_disk_SP_features():
+
+        raise NotImplementedError
+
+
 #test zone
-path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
-dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
+path = osp.join(osp.abspath(osp.dirname(__file__)), "data", "SP_features")
+filename = "k_disk_sp_properties.json"
+sp_gen = K_Disk_SP_Feature_Generator("", k=3, write_properties_root_path = path, write_properties_filename = filename)
+#sp_gen = K_Disk_SP_Feature_Generator("", k=3, properties_path = osp.join(path, filename), write_properties_root_path = path, write_properties_filename = filename)
 
-_data = dataset_mutag.get(0)
+#path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
+#dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
 
-_vertex_select=4
-_k=3
+#_data = dataset_mutag.get(0)
 
-_r=2
-_s=_k
+#_vertex_select=4
+#_k=3
 
-_data_k_disk = gen_k_disk(_k, _data, _vertex_select)
-_data_r_s_ring = gen_r_s_ring(r=_r, s=_s, graph_data=_data, vertex=_vertex_select)
+#_r=2
+#_s=_k
 
-helpers.drawGraph(_data, vertex_select=[_vertex_select], figure_count=1, draw_labels=True)
-helpers.drawGraph(_data_k_disk, figure_count=2, draw_labels=True)
-helpers.drawGraph(_data_r_s_ring, figure_count=3, draw_labels=True)
+#_data_k_disk = gen_k_disk(_k, _data, _vertex_select)
+#_data_r_s_ring = gen_r_s_ring(r=_r, s=_s, graph_data=_data, vertex=_vertex_select)
 
-plt.show()
+#helpers.drawGraph(_data, vertex_select=[_vertex_select], figure_count=1, draw_labels=True)
+#helpers.drawGraph(_data_k_disk, figure_count=2, draw_labels=True)
+#helpers.drawGraph(_data_r_s_ring, figure_count=3, draw_labels=True)
+
+#plt.show()
 
