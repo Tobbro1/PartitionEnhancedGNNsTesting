@@ -17,7 +17,7 @@ from torch_geometric.utils.num_nodes import maybe_num_nodes
 
 #import own functionality
 import developmentHelpers as helpers
-#import SP_features as spf
+import SP_features as spf
 
 #imports to be removed later
 import matplotlib.pyplot as plt
@@ -125,6 +125,7 @@ def gen_r_s_ring(r: int, s: int, graph_data: Data, vertex: int) -> Data:
 
 
 #classes that includes generator functionality for features that can be clustered
+#the generators implement parallelization
 
 class K_Disk_SP_Feature_Generator():
 
@@ -138,22 +139,36 @@ class K_Disk_SP_Feature_Generator():
         #sanity checks
         assert k > 0
 
-        properties = {}
+        self.properties = {}
 
         if properties_path is None:
-            assert write_properties_filename is not None
 
             #compute dataset properties => number of vertices, label alphabet, distances alphabet (maximum diameter of a k-disk given by 2*k + 1), graph sizes
+            self.properties["num_vertices"] = 0
+            if dataset.num_features > 1:
+                self.properties["label_alphabet"] = list(range(dataset.num_features))
+            else:
+                self.properties["label_alphabet"] = []
 
+            self.properties["distances_alphabet"] = list(range(2*k + 1))
+            self.properties["graph_sizes"] = []
+            
+            for i in range(dataset.len()):
+                _curgraph_data = dataset.get(i)
+                _curgraph_num_vertices = _curgraph_data.x.shape[0]
+                self.properties["num_vertices"] += _curgraph_num_vertices
+                self.properties["graph_sizes"].append(_curgraph_num_vertices)
 
-            #test values
-            properties["num_vertices"] = 200
-            properties["label_alphabet"] = [0,2,4,5,6,7,8,9,10,11]
-            properties["distances_alphabet"] = list(range(2*k + 1))
-            properties["graph_sizes"] = [10,20,14,55,3,4,1]
+                if dataset.num_features == 1:
+                    _new_labels_tensor, _, _ = torch.unique(input = _curgraph_data.x, sorted = False)
+                    _new_labels = _new_labels_tensor.flatten().tolist()
+                    self.properties["label_alphabet"].append(_new_labels)
+                    self.properties["label_alphabet"] = list(set(self.properties["label_alphabet"]))
 
             #if write_properties_path is specified, save properties as a json file on disk
             if write_properties_root_path is not None:
+                assert write_properties_filename is not None
+
                 if not osp.exists(write_properties_root_path):
                     os.makedirs(write_properties_root_path)
 
@@ -162,18 +177,25 @@ class K_Disk_SP_Feature_Generator():
                     open(p, 'w').close()  
 
                 with open(p, "w") as file:
-                    file.write(json.dumps(properties, indent=4))
+                    file.write(json.dumps(self.properties, indent=4))
         else:
             #read properties file
             if not osp.exists(properties_path):
                 raise FileNotFoundError
             else:
                 with open(properties_path, "r") as file:
-                    properties = json.loads(file.read())
+                    self.properties = json.loads(file.read())
 
-        assert "num_vertices" in properties and "label_alphabet" in properties and "distances_alphabet" in properties and "graph_sizes" in properties
+        assert "num_vertices" in self.properties and "label_alphabet" in self.properties and "distances_alphabet" in self.properties and "graph_sizes" in self.properties
+        
+        #remove duplicates if necessary
+        self.properties["label_alphabet"] = list(set(self.properties["label_alphabet"]))
+        self.properties["label_alphabet"].sort()
+        self.properties["distances_alphabet"] = list(set(self.properties["distances_alphabet"]))
+        self.properties["distances_alphabet"].sort()
+
         #create graph features object
-        #self.sp_features = spf.SP_graph_features()
+        self.sp_features = spf.SP_graph_features(num_samples = self.properties["num_vertices"], label_alphabet = self.properties["label_alphabet"], distances_alphabet = self.properties["distances_alphabet"], graph_sizes = self.properties["graph_sizes"])
 
     #generate SP features from k-Disks of all vertices and store them on disk
     #TODO: Implement multi-threading
@@ -188,9 +210,15 @@ class K_Disk_SP_Feature_Generator():
 
 
 #test zone
-path = osp.join(osp.abspath(osp.dirname(__file__)), "data", "SP_features")
+#path = osp.join(osp.abspath(osp.dirname(__file__)), "data", "SP_features")
+path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
+mutag_path = osp.join(path, "MUTAG")
+dd_path = osp.join(path, "DD")
+dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
+dataset_dd = TUDataset(root=path, name="DD", use_node_attr=True)
 filename = "k_disk_sp_properties.json"
-sp_gen = K_Disk_SP_Feature_Generator("", k=3, write_properties_root_path = path, write_properties_filename = filename)
+sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_mutag, k=3, write_properties_root_path = mutag_path, write_properties_filename = filename)
+sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_dd, k=3, write_properties_root_path = dd_path, write_properties_filename = filename)
 #sp_gen = K_Disk_SP_Feature_Generator("", k=3, properties_path = osp.join(path, filename), write_properties_root_path = path, write_properties_filename = filename)
 
 #path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')

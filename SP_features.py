@@ -175,45 +175,45 @@ def vertex_sp_feature_map(distances: np.array, x: Tensor, vertex_id: int) -> Dic
 
 #_data = Data(x=_x, edge_index = _edge_index)
 
-path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
-dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
+# path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
+# dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
 
-_data = dataset_mutag.get(13)
-_data2 = dataset_mutag.get(15)
+# _data = dataset_mutag.get(13)
+# _data2 = dataset_mutag.get(15)
 
-_graph_sizes = [_data.x.shape[0], _data2.x.shape[0]]
-print('Graph sizes: ' + str(_graph_sizes))
+# _graph_sizes = [_data.x.shape[0], _data2.x.shape[0]]
+# print('Graph sizes: ' + str(_graph_sizes))
 
-sp_feature_generator = SP_graph_features(num_samples = sum(_graph_sizes) , label_alphabet=range(3), distances_alphabet=range(1,12), graph_sizes = _graph_sizes)
-#testing the indexing functions
-a = sp_feature_generator.get_dataset_idx_from_vertex_identifier(tuple([1,4]))
-print(a)
-print(sp_feature_generator.get_vertex_identifier_from_dataset_idx(a))
+# sp_feature_generator = SP_graph_features(num_samples = sum(_graph_sizes) , label_alphabet=range(3), distances_alphabet=range(1,12), graph_sizes = _graph_sizes)
+# #testing the indexing functions
+# a = sp_feature_generator.get_dataset_idx_from_vertex_identifier(tuple([1,4]))
+# print(a)
+# print(sp_feature_generator.get_vertex_identifier_from_dataset_idx(a))
 
-_floyd_warshall_res = sp_feature_generator.floyd_warshall(_data)
-_floyd_warshall_res2 = sp_feature_generator.floyd_warshall(_data2)
+# _floyd_warshall_res = sp_feature_generator.floyd_warshall(_data)
+# _floyd_warshall_res2 = sp_feature_generator.floyd_warshall(_data2)
 
-_sp_map = sp_feature_generator.sp_feature_map(distances=_floyd_warshall_res, x=_data.x)
-_sp_map2 = sp_feature_generator.sp_feature_map(distances=_floyd_warshall_res2, x=_data2.x)
+# _sp_map = sp_feature_generator.sp_feature_map(distances=_floyd_warshall_res, x=_data.x)
+# _sp_map2 = sp_feature_generator.sp_feature_map(distances=_floyd_warshall_res2, x=_data2.x)
 
-vector = sp_feature_generator.sp_feature_vector_from_feature_map(dict = _sp_map, vertex_identifier=tuple([0,1]))
-print('Feature vector 1: ' + str(vector))
-vector2 = sp_feature_generator.sp_feature_vector_from_feature_map(dict = _sp_map2, vertex_identifier=tuple([1,0]))
-print('Feature vector 2: ' + str(vector2))
+# vector = sp_feature_generator.sp_feature_vector_from_feature_map(dict = _sp_map, vertex_identifier=tuple([0,1]))
+# print('Feature vector 1: ' + str(vector))
+# vector2 = sp_feature_generator.sp_feature_vector_from_feature_map(dict = _sp_map2, vertex_identifier=tuple([1,0]))
+# print('Feature vector 2: ' + str(vector2))
 
-root_path = osp.join('data', 'SP_features')
+# root_path = osp.join('data', 'SP_features')
 
-print('Writing the uncropped dataset..')
-sp_feature_generator.write_dataset(path = sp_feature_generator.get_file_from_local_by_path(root_path = root_path, filename = 'SP_features.svmlight'), comment='Uncropped SP features')
-print('Writing the cropped dataset..')
-sp_feature_generator.crop_feature_vectors()
-print('Cropped Feature vector 1: ' + str(sp_feature_generator.get_dataset()[sp_feature_generator.get_dataset_idx_from_vertex_identifier(tuple([0,1])),:]))
-print('Cropped Feature vector 2: ' + str(sp_feature_generator.get_dataset()[sp_feature_generator.get_dataset_idx_from_vertex_identifier(tuple([1,0])),:]))
-sp_feature_generator.write_dataset(path=sp_feature_generator.get_file_from_local_by_path(root_path = root_path, filename = 'SP_features_cropped.svmlight'), comment='Cropped SP features')
+# print('Writing the uncropped dataset..')
+# sp_feature_generator.write_dataset(path = sp_feature_generator.get_file_from_local_by_path(root_path = root_path, filename = 'SP_features.svmlight'), comment='Uncropped SP features')
+# print('Writing the cropped dataset..')
+# sp_feature_generator.crop_feature_vectors()
+# print('Cropped Feature vector 1: ' + str(sp_feature_generator.get_dataset()[sp_feature_generator.get_dataset_idx_from_vertex_identifier(tuple([0,1])),:]))
+# print('Cropped Feature vector 2: ' + str(sp_feature_generator.get_dataset()[sp_feature_generator.get_dataset_idx_from_vertex_identifier(tuple([1,0])),:]))
+# sp_feature_generator.write_dataset(path=sp_feature_generator.get_file_from_local_by_path(root_path = root_path, filename = 'SP_features_cropped.svmlight'), comment='Cropped SP features')
 
-#_vertex_sp_map = vertex_sp_feature_map(distances=_floyd_warshall_res, x=_data.x, vertex_id = 4)
-#print(_vertex_sp_map)
+# #_vertex_sp_map = vertex_sp_feature_map(distances=_floyd_warshall_res, x=_data.x, vertex_id = 4)
+# #print(_vertex_sp_map)
 
-helpers.drawGraph(_data, labels=_data.x)
-helpers.drawGraph(_data2, labels=_data2.x, figure_count=2)
-plt.show()
+# helpers.drawGraph(_data, labels=_data.x)
+# helpers.drawGraph(_data2, labels=_data2.x, figure_count=2)
+# plt.show()
