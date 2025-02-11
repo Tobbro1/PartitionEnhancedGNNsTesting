@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 class SP_graph_features():
 
-    def __init__(self, num_samples: int, label_alphabet: List[int], distances_alphabet: List[int], graph_sizes: Optional[List[int]] = None):
+    def __init__(self, label_alphabet: List[int], distances_alphabet: List[int], graph_sizes: Optional[List[int]] = None):
         super().__init__()
         self.label_alphabet = label_alphabet
         self.distances_alphabet = distances_alphabet
@@ -79,8 +79,8 @@ class SP_graph_features():
                         result[id + 2] = dict[key]
                         editmask[id + 2] = True
 
-        return tuple([result, editmask])        
-    
+        return tuple([result, editmask])
+
 
 #TODO: Implement cropping etc
 #computes the vertex sp feature map, that is result_(l,d) with label l and distance d is the number of vertices with label l and distance d to the vertex v
