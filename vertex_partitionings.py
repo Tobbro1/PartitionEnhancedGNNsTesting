@@ -17,7 +17,7 @@ import sklearn
 from sklearn.datasets import load_svmlight_file
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics.pairwise import pairwise_distances_argmin
-from sklearn.decomposition import PCA
+from sklearn.decomposition import TruncatedSVD
 
 #numpy
 import numpy as np 
@@ -25,7 +25,10 @@ import numpy as np
 #plotting
 import matplotlib.pyplot as plt
 
-SEED = 37
+# constants
+import constants
+
+SEED = constants.SEED
 
 class Vertex_Partition_Clustering():
 
@@ -38,51 +41,51 @@ class Vertex_Partition_Clustering():
         self.num_vertices = -1
         self.num_features = -1
 
-        self.pca = None
-        self.draw_pca = None
+        self.lsa = None
+        self.draw_lsa = None
 
     # Returns a tuple of the learned components and the ratio of their explained variance
-    def generate_pca(self, target_dimensions) -> Tuple[np.ndarray, np.ndarray]:
+    def generate_lsa(self, target_dimensions) -> Tuple[np.ndarray, np.ndarray]:
 
         # n_components is the number of principal components that are utilised, thus the number of dimensions after the PCA
         # if copy is set to False, the data passed to train the PCA gets overwritten
         # whiten can sometimes improve downstream accuracy of estimators but removes some information from the transformed signal as it normalizes component wise variances
         # svd solver selects the method to solve the underlying singular value decomposition (see PCA documentation for values)
-        self.pca = PCA(n_components = target_dimensions, copy = True, svd_solver = 'arpack')
-        self.pca.fit(self.dataset)
+        self.lsa = TruncatedSVD(n_components = target_dimensions, algorithm = 'arpack')
+        self.lsa.fit(self.dataset)
 
-        return self.pca.components_, self.pca.explained_variance_ratio_
+        return self.lsa.components_, self.lsa.explained_variance_ratio_
 
-    def apply_pca_to_dataset(self):
+    def apply_lsa_to_dataset(self):
         if self.dataset is None or self.num_vertices < 1:
             raise ValueError("Dataset invalid")
         
-        if self.pca is None:
-            raise ValueError("Initialize PCA before applying")
+        if self.lsa is None:
+            raise ValueError("Initialize LSA before applying")
 
-        self.dataset = self.pca.transform(self.dataset)
+        self.dataset = self.lsa.transform(self.dataset)
 
     # A PCA to two dimensions used for visualization
     # Returns a tuple of the learned components and the ratio of their explained variance
     def generate_draw_pca(self) -> Tuple[np.ndarray, np.ndarray]:
 
-        self.draw_pca = PCA(n_components = 2, copy = True, svd_solver = 'arpack')
-        self.draw_pca.fit(self.dataset)
+        self.draw_lsa = TruncatedSVD(n_components = 2, algorithm = 'arpack')
+        self.draw_lsa.fit(self.dataset)
 
-        return self.draw_pca.components_, self.draw_pca.explained_variance_ratio_
+        return self.draw_lsa.components_, self.draw_lsa.explained_variance_ratio_
 
     # This method draws the dataset colored by their assigned cluster according to the label parameter. This makes use of a PCA to two dimensions
     # The grid_granularity parameter is used when visualizing centroid based methods. Note that the grid is made between the smallest and highest values for the PCA transformed vectors which might lead to huge memroy requirements in case of large ranges and small granularity
     def draw_clustering_data(self, num_figure: int, title: str, centroids = None, grid_granularity = 2):
 
-        if self.draw_pca is None:
+        if self.draw_lsa is None:
             self.generate_draw_pca()
         
-        reduced_data = self.draw_pca.transform(self.dataset)
+        reduced_data = self.draw_lsa.transform(self.dataset)
 
         # k-means, code taken from https://scikit-learn.org/stable/auto_examples/cluster/plot_kmeans_digits.html#sphx-glr-auto-examples-cluster-plot-kmeans-digits-py
         if centroids is not None:
-            centroids = self.draw_pca.transform(centroids)
+            centroids = self.draw_lsa.transform(centroids)
 
             h = grid_granularity
 
@@ -104,14 +107,14 @@ class Vertex_Partition_Clustering():
             plt.title(title)
             plt.xlim(x_min, x_max)
             plt.ylim(y_min, y_max)
-            plt.xlabel(f"Component 1: {self.draw_pca.explained_variance_ratio_[0]}")
-            plt.ylabel(f"Component 2: {self.draw_pca.explained_variance_ratio_[1]}")
+            plt.xlabel(f"Component 1: {self.draw_lsa.explained_variance_ratio_[0]}")
+            plt.ylabel(f"Component 2: {self.draw_lsa.explained_variance_ratio_[1]}")
             plt.xticks(())
             plt.yticks(())
 
 
     # Returns a tuple of assignments, centroids, inertia and execution time of the clustering
-    def mini_batch_k_means(self, n_clusters: int, batch_size: int, n_init: int, max_no_improvement: int, max_iter: int) -> float:
+    def mini_batch_k_means(self, n_clusters: int, batch_size: int, n_init: int, max_no_improvement: int, max_iter: int) -> Tuple[np.ndarray, np.ndarray, float, float]:
 
         # batch-size greater than 256 * num_cores for paralllelism on all cores
         # Note that the random_state value is not set, thus inherited from the global numpy random_state value
@@ -152,6 +155,10 @@ class Vertex_Partition_Clustering():
             result[_t] = labels[i]
 
         return result
+    
+    # Write array of given labels into a file for storage (this is done in a human-readable/non-binary way for convenience)
+    def write_clustering_labels(self, labels, path: str, comment: str):
+        np.savetxt(fname = path, X = labels, comments = '#', fmt = '%d', header = comment)
 
 #Test zone
 if __name__ == '__main__':
@@ -167,6 +174,7 @@ if __name__ == '__main__':
     mutag_dataset_filename = "k_disk_SP_features_MUTAG.svmlight"
     dd_dataset_filename = "k_disk_SP_features_DD.svmlight"
     dataset_path = osp.join(path, mutag_path, mutag_dataset_filename)
+    clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels.txt')
 
     clusterer.load_dataset_from_svmlight(dataset_path, dtype='float64')
 
@@ -177,6 +185,7 @@ if __name__ == '__main__':
     mbk_max_iter = 1000
 
     labels, centroids, inertia, clustering_time = clusterer.mini_batch_k_means(n_clusters = mbk_n_clusters, batch_size = mbk_batch_size, n_init = mbk_n_init, max_no_improvement = mbk_max_no_improvement, max_iter = mbk_max_iter)
+    clusterer.write_clustering_labels(labels = labels, path = clusterlabels_path, comment = 'Test')
     #Computed labels: {labels}\nComputed centroids: {centroids}\n
     
     res = clusterer.generate_clustering_result_dict(labels)
