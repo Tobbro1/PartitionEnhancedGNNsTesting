@@ -1,8 +1,10 @@
 #general imports
 import multiprocessing.shared_memory
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict
 import os
 import os.path as osp
+import sys
+import time
 import json #to implement saving and loading the properties of datasets without having to run the computation multiple times
 
 #parallelization
@@ -15,6 +17,8 @@ from torch import Tensor
 
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import Data, Dataset
+from torch_geometric.data.data import DataEdgeAttr, DataTensorAttr
+from torch_geometric.data.storage import GlobalStorage
 import torch_geometric.utils
 
 #numpy
@@ -30,12 +34,17 @@ from torch_geometric.utils.num_nodes import maybe_num_nodes
 import developmentHelpers as helpers
 import SP_features as spf
 
+# OGB
+import ogb.nodeproppred as ogb_node
+from ogb.nodeproppred import PygNodePropPredDataset
+import ogb.graphproppred as ogb_graph
+from ogb.graphproppred import PygGraphPropPredDataset
+
 #imports to be removed later
 import matplotlib.pyplot as plt
-import time
 
-#adaptation of the torch_geometric.utils.k_hop_subgraph method for r-s-Rings
-#NOTE: this implementation only works for undirected graphs unlike the initial implementation of k_hop_subgraph
+# Adaptation of the torch_geometric.utils.k_hop_subgraph method for r-s-Rings
+# NOTE: this implementation only works for undirected graphs unlike the initial implementation of k_hop_subgraph
 def r_s_ring_subgraph(
     node_idx: Union[int, List[int], Tensor],
     r: int,
@@ -119,25 +128,26 @@ def r_s_ring_subgraph(
 #generate k-disk around a vertex v for a given graph G
 def gen_k_disk(k: int, graph_data: Data, vertex: int) -> Data:
 
-    #graph should be a pytorch_geometric Data object
-    #vertex is the index of the considered vertex
+    # graph should be a pytorch_geometric Data object
+    # vertex is the index of the considered vertex
 
-    _subset, _edge_index, _, _ = torch_geometric.utils.k_hop_subgraph(node_idx=vertex, num_hops=k, edge_index=graph_data.__getitem__('edge_index'), relabel_nodes=True)
-    return Data(x=graph_data.__getitem__('x')[_subset], edge_index=_edge_index)
+    _subset, _edge_index, _, _ = torch_geometric.utils.k_hop_subgraph(node_idx=vertex, num_hops=k, edge_index=graph_data.edge_index, relabel_nodes=True)
+    return Data(x=graph_data.x[_subset], edge_index=_edge_index)
 
 #generate r-s-ring around a vertex v for a given graph G
 def gen_r_s_ring(r: int, s: int, graph_data: Data, vertex: int) -> Data:
 
-    #graph should be a pytorch_geometric Data object
-    #vertex is the index of the considered vertex
+    # graph should be a pytorch_geometric Data object
+    # vertex is the index of the considered vertex
 
-    _subset, _edge_index, _, _ = r_s_ring_subgraph(node_idx=vertex, r=r, s=s, edge_index=graph_data.__getitem__('edge_index'), relabel_nodes=True)
-    return Data(x=graph_data.__getitem__('x')[_subset], edge_index=_edge_index)
+    _subset, _edge_index, _, _ = r_s_ring_subgraph(node_idx=vertex, r=r, s=s, edge_index=graph_data.edge_index, relabel_nodes=True)
+    return Data(x=graph_data.x[_subset], edge_index=_edge_index)
 
 # Superclass implementing some basic logging and property extraction functionality
 # NOTE: This class should be treated as an abstract class and never be directly initialized
 class Feature_Generator():
 
+    # NOTE: dataset._data.x must NOT be set to None to ensure proper function and num_features must be at least 1. In the unlabeled case, x should simply be set to the constant 0 vector.
     def __init__(self, dataset: Dataset, dataset_write_path: str, dataset_write_filename: str, result_mmap_dest: str, editmask_mmap_dest: str, properties_path: Optional[str] = None, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None):
         super().__init__()
 
@@ -164,9 +174,9 @@ class Feature_Generator():
                 self.properties["graph_sizes"].append(_curgraph_num_vertices)
 
                 if dataset.num_features == 1:
-                    _new_labels_tensor, _, _ = torch.unique(input = _curgraph_data.x, sorted = False)
+                    _new_labels_tensor = torch.unique(input = _curgraph_data.x, sorted = False)
                     _new_labels = _new_labels_tensor.flatten().tolist()
-                    self.properties["label_alphabet"].append(_new_labels)
+                    self.properties["label_alphabet"].extend(_new_labels)
                     self.properties["label_alphabet"] = list(set(self.properties["label_alphabet"]))
 
             #if write_properties_path is specified, save properties as a json file on disk
@@ -212,6 +222,9 @@ class Feature_Generator():
         # String describing the computed features
         self.title_str = None
 
+        # Dictionary that will be filled with times if time logging is enabled
+        self.times = {}
+
 
     #helpers for indexing and editing of the database array
     def get_vertex_identifier_from_dataset_idx(self, dataset_idx: int) -> Tuple[int, int]:
@@ -242,15 +255,23 @@ class Feature_Generator():
     def compute_feature(self, vertex_idx: int):
         raise NotImplementedError
     
-    #generate SP features from k-Disks of all vertices and store them on disk
-    def generate_features(self, num_processes: int=1, comment: Optional[str]=None):
+    # Utilised for analysis of runtimes, might include significant memory and calculation time overhead
+    def compute_feature_log_times(self, vertex_idx: int):
+        raise NotImplementedError
+    
+    # generate features of all vertices and store them on disk
+    def generate_features(self, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):
 
         assert num_processes > 0
 
         start_time = time.time()
 
         pool = multiprocessing.Pool(processes = num_processes)
-        pool.imap_unordered(self.compute_feature, range(self.properties["num_vertices"]))
+        if log_times:
+            for time_res in pool.imap_unordered(self.compute_feature_log_times, range(self.properties["num_vertices"])):
+                self.times[time_res[0]] = time_res[1]
+        else:
+            pool.imap_unordered(self.compute_feature, range(self.properties["num_vertices"]))
         pool.close()
         pool.join()
 
@@ -262,11 +283,17 @@ class Feature_Generator():
         else:
             comment = self.title_str + f"\nComputation time: {computation_time}\n"
         
-        self.save_k_disk_SP_features(comment)
+        self.save_features(comment)
+
+        if log_times:
+            if time_summary_path != "":
+                self.calculate_time_summary(time_summary_path = time_summary_path, time_summary_filename = time_summary_filename)
+                if dump_times:
+                    self.dump_times(time_dump_path = time_summary_path)
 
     #NOTE: This function must only be called after joining parallelized processes to ensure correct function
     # Implements a simple cropping of the feature vectors 
-    def save_k_disk_SP_features(self, comment: Optional[str]):
+    def save_features(self, comment: Optional[str]):
 
         if not osp.exists(self.dataset_path):
             os.makedirs(self.dataset_path)
@@ -275,7 +302,6 @@ class Feature_Generator():
         if not osp.exists(p):
             open(p, 'w').close()
 
-        #editmask = np.ndarray(shape = self.editmask_shape, dtype=self.editmask_dtype, buffer = self.editmask.buf)
         dataset_result = np.memmap(self.shared_dataset_result_mmap_dest, dtype = self.shared_dataset_result_dtype, mode = 'r+', shape = self.shared_dataset_result_shape)
         editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
 
@@ -283,6 +309,71 @@ class Feature_Generator():
             datasets.dump_svmlight_file(X = dataset_result[:,editmask], y = np.zeros(self.properties["num_vertices"]), f = p, comment = "")
         else:
             datasets.dump_svmlight_file(X = dataset_result[:,editmask], y = np.zeros(self.properties["num_vertices"]), f = p, comment = comment)
+
+    # Helper to evaluate time complexity of individual operations
+    def log_time(self, id, event: str, value: float):
+        if id not in self.times:
+            self.times[id] = {}
+        
+        self.times[id][event] = value
+
+    def calculate_time_summary(self, time_summary_path: str, time_summary_filename: Optional[str] = None):
+        assert len(self.times) > 0
+        if time_summary_filename is None:
+            time_summary_filename = "time_summary.txt"
+
+        summary_str_list = []
+
+        summary_str_list.append(f"Time summary for {self.title_str}:\n\n")
+
+        # calculate average times for each step (/event)
+        # The keys of summary are the events and the values are tuples (implemented as list with 2 elements) of the number of times a time for the specified event has been stored and the sum of the stored times.
+        # The number of times a time for an event has been stored is useful to detect potentially erronious computation
+        summary = {}
+
+        for _, time_dict in self.times.items():
+            for event, value in time_dict.items():
+                if event not in summary:
+                    summary[event] = [0, float(0)]
+
+                summary[event][0] += 1
+                summary[event][1] += value
+
+        for event, value in summary.items():
+            if value[0] != self.properties["num_vertices"]:
+                summary_str_list.append(f"WARNING: a time for {event} has not been stored for every iteration\n")
+
+            avg = value[1] / value[0]
+            summary_str_list.append(f"{event} has been computed in {avg} on average in {value[0]} iterations\n")
+
+        summary_str = "".join(summary_str_list)
+        
+        # Write the summary into a file
+        if not osp.exists(time_summary_path):
+            os.makedirs(time_summary_path)
+
+        p = osp.join(time_summary_path, time_summary_filename)
+        if not osp.exists(p):
+            open(p, 'w').close()  
+
+        with open(p, "w") as file:
+            file.write(summary_str)
+
+    # Can be used to dump a json file with all the stored times
+    def dump_times(self, time_dump_path: str, time_dump_filename: Optional[str] = None):
+        if time_dump_filename is None:
+            time_dump_filename = "times_dump.json"
+
+        if not osp.exists(time_dump_path):
+            os.makedirs(time_dump_path)
+
+        p = osp.join(time_dump_path, time_dump_filename)
+        if not osp.exists(p):
+            open(p, 'w').close()  
+
+        with open(p, "w") as file:
+            file.write(json.dumps(self.times, indent=4))
+
 
 #classes that includes generator functionality for features that can be clustered and implement parallelization functionality
 
@@ -300,7 +391,8 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
 
         self.k = k
 
-        self.properties["distances_alphabet"] = list(range(2*self.k + 1))
+        # The property distances_alphabet is required for the SP features
+        self.properties["distances_alphabet"] = list(range(2*self.k + 2))
         
         self.title_str = f"{self.k}-Disk SP features"
 
@@ -334,9 +426,10 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
         #create graph features object for computation purposes
         self.sp_features = spf.SP_graph_features(label_alphabet = self.properties["label_alphabet"], distances_alphabet = self.properties["distances_alphabet"], graph_sizes = self.properties["graph_sizes"])
 
-    #start method of a new process
-    #compute the k_disk SP feature vector for a single data point
+    # Start method of a new process
+    # Compute the k-disk SP feature vector for a single data point
     def compute_feature(self, vertex_idx: int):
+        #get the graph associated with vertex_idx
         graph_id, vertex_id = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
         cur_graph = self.dataset.get(graph_id)
 
@@ -354,31 +447,316 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
         editmask[:] = np.logical_or(editmask, editmask_res)
         self.edit_dataset_result_by_index(dataset_idx = vertex_idx, vector = result)
 
+    # Start method of a new process
+    # Compute the k-disk SP feature vector for a single data point with logging the times using the log_time() method
+    # Returns a tuple of the computed idx (necessary since the order in which this function is called is arbitrary) and the computed times.
+    def compute_feature_log_times(self, vertex_idx: int):
+        #get the graph associated with vertex_idx
+        get_graph_start = time.time()
+        graph_id, vertex_id = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
+        cur_graph = self.dataset.get(graph_id)
+        get_graph_time = time.time() - get_graph_start
+        self.log_time(vertex_idx, event='load_graph', value = get_graph_time)
+
+        #generate k disk
+        gen_k_disk_start = time.time()
+        k_disk = gen_k_disk(k = self.k, graph_data = cur_graph, vertex = vertex_id)
+        gen_k_disk_time = time.time() - gen_k_disk_start
+        self.log_time(vertex_idx, event='gen_k_disk', value = gen_k_disk_time)
+
+        #run floyd warshall on the k disk to compute a distances matrix
+        floyd_warshall_start = time.time()
+        floyd_warshall_distances = self.sp_features.floyd_warshall(graph = k_disk)
+        floyd_warshall_time = time.time() - floyd_warshall_start
+        self.log_time(vertex_idx, event='floyd_warshall', value = floyd_warshall_time)
+
+        #compute a dictionary representing the sp distances in the k disk
+        sp_map_start = time.time()
+        sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = k_disk.x)
+        result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = tuple([graph_id, vertex_id]))
+        sp_map_time = time.time() - sp_map_start
+        self.log_time(vertex_idx, event='SP_vector_computation', value = sp_map_time)
+
+        save_res_start = time.time()
+        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        editmask[:] = np.logical_or(editmask, editmask_res)
+        self.edit_dataset_result_by_index(dataset_idx = vertex_idx, vector = result)
+        save_res_time = time.time() - save_res_start
+        self.log_time(vertex_idx, event='store_sp_vector_memory', value = save_res_time)
+
+        return vertex_idx, self.times[vertex_idx]
+
+class R_S_Ring_SP_Feature_Generator(Feature_Generator):
+
+    #dataset: The dataset of which the features should be generated, k: the k-value for the k-disk generation, 
+    #properties_path: if set specifies path of a json file including the dataset properties such that they do not need to be computed again, 
+    #write_properties_path: if set specifies the path to which computed properties are saved in a json file; this path is recommended to coincide with the path, the dataset is saved to
+    #write_properties_filename: if specified set the filename for the properties json file
+    def __init__(self, dataset: Dataset, r: int, s: int, dataset_write_path: str, dataset_write_filename: str, result_mmap_dest: str, editmask_mmap_dest: str, properties_path: Optional[str] = None, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None):
+        super().__init__(dataset = dataset, dataset_write_path = dataset_write_path, dataset_write_filename = dataset_write_filename, result_mmap_dest = result_mmap_dest, editmask_mmap_dest = editmask_mmap_dest, properties_path = properties_path, write_properties_root_path = write_properties_root_path, write_properties_filename = write_properties_filename)
+
+        # sanity checks
+        assert r > 0
+        assert s > 0
+        assert s > r
+
+        self.r = r
+        self.s = s
+
+        # The property distances_alphabet is required for the SP features
+        self.properties["distances_alphabet"] = list(range(2*self.s + 2))
+        
+        self.title_str = f"{self.r}-{self.s}-Ring SP features"
+
+        assert "distances_alphabet" in self.properties
+        assert len(self.properties["distances_alphabet"]) > 0
+
+        # remove duplicates if necessary
+        self.properties["distances_alphabet"] = list(set(self.properties["distances_alphabet"]))
+        self.properties["distances_alphabet"].sort()
+
+        # create a dataset np array as shared memory to store the computed feature vectors
+        self.shared_dataset_result_dtype = 'float64'
+        self.shared_dataset_result_shape = tuple([self.properties["num_vertices"], ((len(self.properties["label_alphabet"])**2) * len(self.properties["distances_alphabet"])) + 2])
+        self.shared_dataset_result_mmap_dest = result_mmap_dest
+
+        dataset_result = np.memmap(self.shared_dataset_result_mmap_dest, dtype = self.shared_dataset_result_dtype, mode = 'w+', shape = self.shared_dataset_result_shape)
+        dataset_result.fill(0)
+        dataset_result.flush()
+
+        # implement the editmask as a memmap
+        self.shared_editmask_mmap_dest = editmask_mmap_dest
+        self.shared_editmask_shape = tuple([((len(self.properties["label_alphabet"])**2) * len(self.properties["distances_alphabet"])) + 2,])
+        self.shared_editmask_dtype = np.bool
+
+        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype=self.shared_editmask_dtype, mode = 'w+', shape=self.shared_editmask_shape)
+        editmask.fill(False)
+        editmask[0] = True
+        editmask[1] = True
+        editmask.flush()
+        
+        #create graph features object for computation purposes
+        self.sp_features = spf.SP_graph_features(label_alphabet = self.properties["label_alphabet"], distances_alphabet = self.properties["distances_alphabet"], graph_sizes = self.properties["graph_sizes"])
+
+    # Start method of a new process
+    # Compute the r-s-ring SP feature vector for a single data point
+    def compute_feature(self, vertex_idx: int):
+        #get the graph associated with vertex_idx
+        graph_id, vertex_id = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
+        cur_graph = self.dataset.get(graph_id)
+
+        #generate r-s-ring
+        r_s_ring = gen_r_s_ring(r = self.r, s = self.s, graph_data = cur_graph, vertex = vertex_id)
+
+        #run floyd warshall on the k disk to compute a distances matrix
+        floyd_warshall_distances = self.sp_features.floyd_warshall(graph = r_s_ring)
+
+        #compute a dictionary representing the sp distances in the k disk
+        sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = r_s_ring.x)
+        result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = tuple([graph_id, vertex_id]))
+
+        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        editmask[:] = np.logical_or(editmask, editmask_res)
+        self.edit_dataset_result_by_index(dataset_idx = vertex_idx, vector = result)
+
+    # Start method of a new process
+    # Compute the r-s-ring SP feature vector for a single data point with logging the times using the log_time() method
+    def compute_feature_log_times(self, vertex_idx: int):
+        #get the graph associated with vertex_idx
+        get_graph_start = time.time()
+        graph_id, vertex_id = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
+        cur_graph = self.dataset.get(graph_id)
+        get_graph_time = time.time() - get_graph_start
+        self.log_time(vertex_idx, event='load_graph', value = get_graph_time)
+
+        #generate k disk
+        gen_r_s_ring_start = time.time()
+        r_s_ring = gen_r_s_ring(r = self.r, s = self.s, graph_data = cur_graph, vertex = vertex_id)
+        gen_r_s_ring_time = time.time() - gen_r_s_ring_start
+        self.log_time(vertex_idx, event='gen_r_s_ring', value = gen_r_s_ring_time)
+
+        #run floyd warshall on the k disk to compute a distances matrix
+        floyd_warshall_start = time.time()
+        floyd_warshall_distances = self.sp_features.floyd_warshall(graph = r_s_ring)
+        floyd_warshall_time = time.time() - floyd_warshall_start
+        self.log_time(vertex_idx, event='floyd_warshall', value = floyd_warshall_time)
+
+        #compute a dictionary representing the sp distances in the k disk
+        sp_map_start = time.time()
+        sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = r_s_ring.x)
+        result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = tuple([graph_id, vertex_id]))
+        sp_map_time = time.time() - sp_map_start
+        self.log_time(vertex_idx, event='SP_vector_computation', value = sp_map_time)
+
+        save_res_start = time.time()
+        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        editmask[:] = np.logical_or(editmask, editmask_res)
+        self.edit_dataset_result_by_index(dataset_idx = vertex_idx, vector = result)
+        save_res_time = time.time() - save_res_start
+        self.log_time(vertex_idx, event='store_sp_vector_memory', value = save_res_time)
 
 #test zone
-if __name__ == '__main__':
-    #path = osp.join(osp.abspath(osp.dirname(__file__)), "data", "SP_features")
+
+# Only for testing purposes
+def run_mutag():
     path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
     mutag_path = osp.join(path, "MUTAG")
-    dd_path = osp.join(path, "DD")
     result_mmap_path = 'results.np'
     editmask_mmap_path = 'editmask.np'
     dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
-    dataset_dd = TUDataset(root=path, name="DD", use_node_attr=True)
-    filename = "k_disk_sp_properties.json"
-    sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_mutag, k = 3, dataset_write_path = mutag_path, dataset_write_filename = "k_disk_SP_features_MUTAG.svmlight", result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = osp.join(mutag_path, filename), write_properties_root_path = mutag_path, write_properties_filename = filename)
-    #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_dd, k = 3, dataset_write_path = dd_path, dataset_write_filename = "k_disk_SP_features_DD.svmlight", result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = osp.join(dd_path, filename), write_properties_root_path = dd_path, write_properties_filename = filename)
-    #
-    #  print('Single process performance: ')
-    # ts_single = time.time_ns()
-    # sp_gen.generate_k_disk_SP_features(num_processes = 1, comment = "testcomment1")
-    # time_single = (time.time_ns() - ts_single) / 1_000
-    # print('Single threaded time: ' + str(time_single))
+    filename = "sp_properties.json"
+    mutag_properties_path = None #osp.join(mutag_path, filename)
+
+    k = 3
+    r = 3
+    s = 5
+
+    dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_MUTAG.svmlight"
+    dataset_write_filename_k_disk = f"{k}_disk_SP_features_MUTAG.svmlight"
+
+    sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_mutag, k = k, dataset_write_path = mutag_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = mutag_properties_path, write_properties_root_path = mutag_path, write_properties_filename = filename)
+    #sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_mutag, r = r, s = s, dataset_write_path = mutag_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = mutag_properties_path, write_properties_root_path = mutag_path, write_properties_filename = filename)
+
     print('Multi process performance: ')
     ts_multi = time.time_ns()
-    sp_gen.generate_features(num_processes = 8, comment = None)
+    sp_gen.generate_features(num_processes = 8, comment = None, log_times=True, dump_times = True, time_summary_path = mutag_path)
     time_multi = (time.time_ns() - ts_multi) / 1_000_000
     print('Multi threaded time: ' + str(time_multi))
+
+def run_products():
+
+    # Testing the OGB data loader compatibility
+    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    products_path = osp.join(path, "PRODUCTS")
+    result_mmap_path = 'results.np'
+    editmask_mmap_path = 'editmask.np'
+    dataset_products = PygNodePropPredDataset(name = 'ogbn-products', root = products_path)
+    filename = "sp_properties.json"
+    products_properties_path = None #osp.join(products_path, filename)
+
+    # Necessary to ensure proper function since x is set to None by default
+    dataset_products._data.x = torch.zeros((dataset_products[0].num_nodes, 1), dtype = torch.long)
+
+    print(dataset_products[0])
+
+    k = 3
+    r = 3
+    s = 4
+    dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_PRODUCTS.svmlight"
+    dataset_write_filename_k_disk = f"{k}_disk_SP_features_PRODUCTS.svmlight"
+
+    #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_products, k = k, dataset_write_path = products_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = products_properties_path, write_properties_root_path = products_path, write_properties_filename = filename)
+    sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_products, r = r, s = s, dataset_write_path = products_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = products_properties_path, write_properties_root_path = products_path, write_properties_filename = filename)
+
+    print('Multi process performance: ')
+    ts_multi = time.time_ns()
+    sp_gen.generate_features(num_processes = 1, comment = None, log_times=True, dump_times = False, time_summary_path = products_path)
+    time_multi = (time.time_ns() - ts_multi) / 1_000_000
+    print('Multi threaded time: ' + str(time_multi))
+
+def run_arxiv():
+    # Testing the OGB data loader compatibility
+    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    arxiv_path = osp.join(path, "ARXIV")
+    result_mmap_path = 'results.np'
+    editmask_mmap_path = 'editmask.np'
+    dataset_arxiv = PygNodePropPredDataset(name = 'ogbn-arxiv', root = arxiv_path)
+    filename = "sp_properties.json"
+    arxiv_properties_path = None #osp.join(products_path, filename)
+
+    # Necessary to ensure proper function since x is set to None by default
+    dataset_arxiv._data.x = torch.zeros((dataset_arxiv[0].num_nodes, 1), dtype = torch.long)
+
+    print(dataset_arxiv[0])
+
+    k = 6
+    r = 3
+    s = 4
+    dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_ARXIV.svmlight"
+    dataset_write_filename_k_disk = f"{k}_disk_SP_features_ARXIV.svmlight"
+
+    #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_arxiv, k = k, dataset_write_path = arxiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = arxiv_properties_path, write_properties_root_path = arxiv_path, write_properties_filename = filename)
+    sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_arxiv, r = r, s = s, dataset_write_path = arxiv_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = arxiv_properties_path, write_properties_root_path = arxiv_path, write_properties_filename = filename)
+
+    print('Multi process performance: ')
+    ts_multi = time.time_ns()
+    sp_gen.generate_features(num_processes = 1, comment = None, log_times=True, dump_times = False, time_summary_path = arxiv_path)
+    time_multi = (time.time_ns() - ts_multi) / 1_000_000
+    print('Multi threaded time: ' + str(time_multi))
+
+def run_molhiv():
+    # Testing the OGB data loader compatibility
+    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    molhiv_path = osp.join(path, "MOL_HIV")
+    result_mmap_path = 'results.np'
+    editmask_mmap_path = 'editmask.np'
+    dataset_molhiv = PygGraphPropPredDataset(name = 'ogbg-molhiv', root = molhiv_path)
+    filename = "sp_properties.json"
+    molhiv_properties_path = osp.join(molhiv_path, filename)
+    k = 6
+
+    #remove vertex features
+    dataset_molhiv._data.x = torch.zeros((dataset_molhiv._data.x.size()[0], 1), dtype = torch.long)
+    
+    k = 6
+    r = 2
+    s = 4
+    dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_MOLHIV.svmlight"
+    dataset_write_filename_k_disk = f"{k}_disk_SP_features_MOLHIV.svmlight"
+
+    sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
+    
+    print('Multi process performance: ')
+    ts_multi = time.time_ns()
+    sp_gen.generate_features(num_processes = 8, comment = "SP 6-disk feature extraction for the mol-hiv dataset on 8 processes", log_times = True, dump_times = False, time_summary_path = molhiv_path)
+    time_multi = (time.time_ns() - ts_multi) / 1_000_000
+    print('Multi threaded time: ' + str(time_multi))
+
+if __name__ == '__main__':
+    #path = osp.join(osp.abspath(osp.dirname(__file__)), "data", "SP_features")
+    # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
+    # mutag_path = osp.join(path, "MUTAG")
+    # dd_path = osp.join(path, "DD")
+    # result_mmap_path = 'results.np'
+    # editmask_mmap_path = 'editmask.np'
+    # dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
+    # dataset_dd = TUDataset(root=path, name="DD", use_node_attr=True)
+    # filename = "k_disk_sp_properties.json"
+    # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_mutag, k = 3, dataset_write_path = mutag_path, dataset_write_filename = "k_disk_SP_features_MUTAG.svmlight", result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = osp.join(mutag_path, filename), write_properties_root_path = mutag_path, write_properties_filename = filename)
+    
+    # Required for pytorch version >= 2.6.0 since torch.load weights_only default value was changed from 'False' to 'True'
+    torch.serialization.add_safe_globals([DataEdgeAttr, DataTensorAttr, GlobalStorage])
+
+    # Testing the OGB data loader compatibility
+    run_mutag()
+
+    # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    # proteins_path = osp.join(path, "PROTEINS")
+    # result_mmap_path = 'results.np'
+    # editmask_mmap_path = 'editmask.np'
+    # dataset_proteins = PygNodePropPredDataset(name = 'ogbn-proteins', root = proteins_path)
+    # filename = "k_disk_sp_properties.json"
+    # protein_properties_path = None #osp.join(proteins_path, filename)
+
+    # #Necessary to ensure proper function since x is set to None by default
+    # dataset_proteins._data.x = torch.zeros((dataset_proteins[0].num_nodes, 1))
+
+    # print(dataset_proteins[0])
+
+    # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_proteins, k = 3, dataset_write_path = proteins_path, dataset_write_filename = "k_disk_SP_features_PROTEINS.svmlight", result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = protein_properties_path, write_properties_root_path = proteins_path, write_properties_filename = filename)
+    
+    # #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_dd, k = 3, dataset_write_path = dd_path, dataset_write_filename = "k_disk_SP_features_DD.svmlight", result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = osp.join(dd_path, filename), write_properties_root_path = dd_path, write_properties_filename = filename)
+    # #
+    # #  print('Single process performance: ')
+    # # ts_single = time.time_ns()
+    # # sp_gen.generate_k_disk_SP_features(num_processes = 1, comment = "testcomment1")
+    # # time_single = (time.time_ns() - ts_single) / 1_000
+    # # print('Single threaded time: ' + str(time_single))
+    # print('Multi process performance: ')
+    # ts_multi = time.time_ns()
+    # sp_gen.generate_features(num_processes = 1, comment = None)
+    # time_multi = (time.time_ns() - ts_multi) / 1_000_000
+    # print('Multi threaded time: ' + str(time_multi))
     #sp_gen.close_shared_memory()
 
     #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_dd, k=3, write_properties_root_path = dd_path, write_properties_filename = filename)

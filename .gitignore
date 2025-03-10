@@ -165,5 +165,6 @@ cython_debug/
 data/
 #ignore note txt file
 general_implementation_notes.txt
+dataset_notes.txt
 #ignore memmap files
 *.np

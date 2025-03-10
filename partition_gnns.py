@@ -368,8 +368,8 @@ if __name__ == '__main__':
     mutag_dataset_filename = "k_disk_SP_features_MUTAG.svmlight"
     dd_dataset_filename = "k_disk_SP_features_DD.svmlight"
     dataset_path = osp.join(path, mutag_path, mutag_dataset_filename)
-    clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels.txt')
-    # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels_zero.txt')
+    # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels.txt')
+    clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels_zero.txt')
 
     gnn_generator.read_clustering_labels(path = clusterlabels_path)
     # NOTE: force_reload needs to be set to True in order to update the clustering information in the dataset. When re-running the program with identical settings it may be left False. Otherwise read_clustering_labels does not apply the update leading to potentially incorrect, thus unpredictable behaviour
