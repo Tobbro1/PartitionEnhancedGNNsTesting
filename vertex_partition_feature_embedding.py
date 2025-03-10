@@ -6,6 +6,8 @@ import os.path as osp
 import sys
 import time
 import json #to implement saving and loading the properties of datasets without having to run the computation multiple times
+import tqdm
+from enum import Enum
 
 #parallelization
 import multiprocessing
@@ -143,6 +145,16 @@ def gen_r_s_ring(r: int, s: int, graph_data: Data, vertex: int) -> Data:
     _subset, _edge_index, _, _ = r_s_ring_subgraph(node_idx=vertex, r=r, s=s, edge_index=graph_data.edge_index, relabel_nodes=True)
     return Data(x=graph_data.x[_subset], edge_index=_edge_index)
 
+# An enum used to encode events for time logging if desired
+class TimeLoggingEvent(Enum):
+    load_graph = 0
+    gen_k_disk = 1
+    gen_r_s_ring = 2
+    floyd_warshall = 3
+    SP_vector_computation = 4
+    store_sp_vector_memory = 5
+
+
 # Superclass implementing some basic logging and property extraction functionality
 # NOTE: This class should be treated as an abstract class and never be directly initialized
 class Feature_Generator():
@@ -223,8 +235,8 @@ class Feature_Generator():
         self.title_str = None
 
         # Dictionary that will be filled with times if time logging is enabled
-        self.times = {}
-
+        self.num_events = len(TimeLoggingEvent)
+        
 
     #helpers for indexing and editing of the database array
     def get_vertex_identifier_from_dataset_idx(self, dataset_idx: int) -> Tuple[int, int]:
@@ -260,18 +272,24 @@ class Feature_Generator():
         raise NotImplementedError
     
     # generate features of all vertices and store them on disk
-    def generate_features(self, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):
+    def generate_features(self, num_processes: int=1, inputs: Optional[List[int]] = None, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):
 
         assert num_processes > 0
+        if inputs is None:
+            inputs = range(self.properties["num_vertices"])
 
         start_time = time.time()
 
         pool = multiprocessing.Pool(processes = num_processes)
         if log_times:
-            for time_res in pool.imap_unordered(self.compute_feature_log_times, range(self.properties["num_vertices"])):
-                self.times[time_res[0]] = time_res[1]
+            self.times = np.zeros(shape = (self.properties["num_vertices"], self.num_events), dtype = np.float32)
+
+            for time_res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, inputs), total = len(inputs)):
+                #self.times[time_res[0],:] = time_res[1][:]
+                continue
         else:
-            pool.imap_unordered(self.compute_feature, range(self.properties["num_vertices"]))
+            for _ in tqdm.tqdm(pool.imap_unordered(self.compute_feature, inputs), total = len(inputs)):
+                continue
         pool.close()
         pool.join()
 
@@ -311,11 +329,9 @@ class Feature_Generator():
             datasets.dump_svmlight_file(X = dataset_result[:,editmask], y = np.zeros(self.properties["num_vertices"]), f = p, comment = comment)
 
     # Helper to evaluate time complexity of individual operations
-    def log_time(self, id, event: str, value: float):
-        if id not in self.times:
-            self.times[id] = {}
+    def log_time(self, event: TimeLoggingEvent, value: float):
         
-        self.times[id][event] = value
+        self.times[event.value] = value
 
     def calculate_time_summary(self, time_summary_path: str, time_summary_filename: Optional[str] = None):
         assert len(self.times) > 0
@@ -329,22 +345,23 @@ class Feature_Generator():
         # calculate average times for each step (/event)
         # The keys of summary are the events and the values are tuples (implemented as list with 2 elements) of the number of times a time for the specified event has been stored and the sum of the stored times.
         # The number of times a time for an event has been stored is useful to detect potentially erronious computation
-        summary = {}
+        summary = np.zeros(shape = (self.num_events), dtype = np.float32)
+        count = np.zeros(shape = (self.num_events), dtype = np.int32)
 
-        for _, time_dict in self.times.items():
-            for event, value in time_dict.items():
-                if event not in summary:
-                    summary[event] = [0, float(0)]
+        for t in self.times:
+            mask = (t >= 0)
+            count[mask] += 1
+            summary[mask] += t[mask]
 
-                summary[event][0] += 1
-                summary[event][1] += value
+        for event in TimeLoggingEvent:
+            if count[event.value] == 0:
+                continue
 
-        for event, value in summary.items():
-            if value[0] != self.properties["num_vertices"]:
-                summary_str_list.append(f"WARNING: a time for {event} has not been stored for every iteration\n")
+            if count[event.value] != self.properties["num_vertices"]:
+                summary_str_list.append(f"WARNING: a time for {event.name} has not been stored for every iteration\n")
 
-            avg = value[1] / value[0]
-            summary_str_list.append(f"{event} has been computed in {avg} on average in {value[0]} iterations\n")
+            avg = summary[event.value] / count[event.value]
+            summary_str_list.append(f"{event.name} has been computed in {avg}s on average over {count[event.value]} iterations\n")
 
         summary_str = "".join(summary_str_list)
         
@@ -364,6 +381,13 @@ class Feature_Generator():
         if time_dump_filename is None:
             time_dump_filename = "times_dump.json"
 
+        dump = {}
+        for idx in range(self.properties["num_vertices"]):
+            dump[idx] = {}
+            for event in TimeLoggingEvent:
+                if self.times[idx, event.value] >= 0:
+                    dump[idx][event.name] = float(self.times[idx, event.value])
+
         if not osp.exists(time_dump_path):
             os.makedirs(time_dump_path)
 
@@ -372,7 +396,7 @@ class Feature_Generator():
             open(p, 'w').close()  
 
         with open(p, "w") as file:
-            file.write(json.dumps(self.times, indent=4))
+            file.write(json.dumps(dump, indent=4))
 
 
 #classes that includes generator functionality for features that can be clustered and implement parallelization functionality
@@ -450,41 +474,44 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
     # Start method of a new process
     # Compute the k-disk SP feature vector for a single data point with logging the times using the log_time() method
     # Returns a tuple of the computed idx (necessary since the order in which this function is called is arbitrary) and the computed times.
+    # NOTE: logging the computation times is significantly slower than running the computation without, thus this method should only be utilised on a limited amount of vertices
     def compute_feature_log_times(self, vertex_idx: int):
+        self.times = np.full(shape = (self.num_events), dtype = np.float32, fill_value = -1)
+
         #get the graph associated with vertex_idx
         get_graph_start = time.time()
         graph_id, vertex_id = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
         cur_graph = self.dataset.get(graph_id)
         get_graph_time = time.time() - get_graph_start
-        self.log_time(vertex_idx, event='load_graph', value = get_graph_time)
+        self.log_time(event = TimeLoggingEvent.load_graph, value = get_graph_time)
 
         #generate k disk
         gen_k_disk_start = time.time()
         k_disk = gen_k_disk(k = self.k, graph_data = cur_graph, vertex = vertex_id)
         gen_k_disk_time = time.time() - gen_k_disk_start
-        self.log_time(vertex_idx, event='gen_k_disk', value = gen_k_disk_time)
+        self.log_time(event = TimeLoggingEvent.gen_k_disk, value = gen_k_disk_time)
 
         #run floyd warshall on the k disk to compute a distances matrix
         floyd_warshall_start = time.time()
         floyd_warshall_distances = self.sp_features.floyd_warshall(graph = k_disk)
         floyd_warshall_time = time.time() - floyd_warshall_start
-        self.log_time(vertex_idx, event='floyd_warshall', value = floyd_warshall_time)
+        self.log_time(event = TimeLoggingEvent.floyd_warshall, value = floyd_warshall_time)
 
         #compute a dictionary representing the sp distances in the k disk
         sp_map_start = time.time()
         sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = k_disk.x)
         result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = tuple([graph_id, vertex_id]))
         sp_map_time = time.time() - sp_map_start
-        self.log_time(vertex_idx, event='SP_vector_computation', value = sp_map_time)
+        self.log_time(event = TimeLoggingEvent.SP_vector_computation, value = sp_map_time)
 
         save_res_start = time.time()
         editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
         editmask[:] = np.logical_or(editmask, editmask_res)
         self.edit_dataset_result_by_index(dataset_idx = vertex_idx, vector = result)
         save_res_time = time.time() - save_res_start
-        self.log_time(vertex_idx, event='store_sp_vector_memory', value = save_res_time)
+        self.log_time(event = TimeLoggingEvent.store_sp_vector_memory, value = save_res_time)
 
-        return vertex_idx, self.times[vertex_idx]
+        return vertex_idx, self.times
 
 class R_S_Ring_SP_Feature_Generator(Feature_Generator):
 
@@ -561,39 +588,44 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
 
     # Start method of a new process
     # Compute the r-s-ring SP feature vector for a single data point with logging the times using the log_time() method
+    # NOTE: logging the computation times is significantly slower than running the computation without, thus this method should only be utilised on a limited amount of vertices
     def compute_feature_log_times(self, vertex_idx: int):
+        self.times = np.full(shape = (self.num_events), dtype = np.float32, fill_value = -1)
+
         #get the graph associated with vertex_idx
         get_graph_start = time.time()
         graph_id, vertex_id = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
         cur_graph = self.dataset.get(graph_id)
         get_graph_time = time.time() - get_graph_start
-        self.log_time(vertex_idx, event='load_graph', value = get_graph_time)
+        self.log_time(event = TimeLoggingEvent.load_graph, value = get_graph_time)
 
         #generate k disk
         gen_r_s_ring_start = time.time()
         r_s_ring = gen_r_s_ring(r = self.r, s = self.s, graph_data = cur_graph, vertex = vertex_id)
         gen_r_s_ring_time = time.time() - gen_r_s_ring_start
-        self.log_time(vertex_idx, event='gen_r_s_ring', value = gen_r_s_ring_time)
+        self.log_time(event = TimeLoggingEvent.gen_r_s_ring, value = gen_r_s_ring_time)
 
         #run floyd warshall on the k disk to compute a distances matrix
         floyd_warshall_start = time.time()
         floyd_warshall_distances = self.sp_features.floyd_warshall(graph = r_s_ring)
         floyd_warshall_time = time.time() - floyd_warshall_start
-        self.log_time(vertex_idx, event='floyd_warshall', value = floyd_warshall_time)
+        self.log_time(event= TimeLoggingEvent.floyd_warshall, value = floyd_warshall_time)
 
         #compute a dictionary representing the sp distances in the k disk
         sp_map_start = time.time()
         sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = r_s_ring.x)
         result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = tuple([graph_id, vertex_id]))
         sp_map_time = time.time() - sp_map_start
-        self.log_time(vertex_idx, event='SP_vector_computation', value = sp_map_time)
+        self.log_time(event = TimeLoggingEvent.SP_vector_computation, value = sp_map_time)
 
         save_res_start = time.time()
         editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
         editmask[:] = np.logical_or(editmask, editmask_res)
         self.edit_dataset_result_by_index(dataset_idx = vertex_idx, vector = result)
         save_res_time = time.time() - save_res_start
-        self.log_time(vertex_idx, event='store_sp_vector_memory', value = save_res_time)
+        self.log_time(event= TimeLoggingEvent.store_sp_vector_memory, value = save_res_time)
+
+        return vertex_idx, self.times
 
 #test zone
 
@@ -605,7 +637,7 @@ def run_mutag():
     editmask_mmap_path = 'editmask.np'
     dataset_mutag = TUDataset(root=path, name="MUTAG", use_node_attr=True)
     filename = "sp_properties.json"
-    mutag_properties_path = None #osp.join(mutag_path, filename)
+    mutag_properties_path = osp.join(mutag_path, filename)
 
     k = 3
     r = 3
@@ -708,7 +740,7 @@ def run_molhiv():
     
     print('Multi process performance: ')
     ts_multi = time.time_ns()
-    sp_gen.generate_features(num_processes = 8, comment = "SP 6-disk feature extraction for the mol-hiv dataset on 8 processes", log_times = True, dump_times = False, time_summary_path = molhiv_path)
+    sp_gen.generate_features(num_processes = 8, comment = "SP 6-disk feature extraction for the mol-hiv dataset on 8 processes", log_times = False, dump_times = False, time_summary_path = molhiv_path)
     time_multi = (time.time_ns() - ts_multi) / 1_000_000
     print('Multi threaded time: ' + str(time_multi))
 
@@ -728,7 +760,7 @@ if __name__ == '__main__':
     torch.serialization.add_safe_globals([DataEdgeAttr, DataTensorAttr, GlobalStorage])
 
     # Testing the OGB data loader compatibility
-    run_mutag()
+    run_molhiv()
 
     # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
     # proteins_path = osp.join(path, "PROTEINS")
