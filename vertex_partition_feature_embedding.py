@@ -246,17 +246,17 @@ class Feature_Generator():
         if samples is None:
             # We compute the feature vectors for the whole dataset
             self.samples = list(range(self.properties["num_vertices"]))
-            self.sampled_graphs = list(range(self.properties["graph_sizes"].size))
+            self.sampled_graphs = set(range(self.properties["graph_sizes"].size))
         else:
             if node_pred:
                 # Only one graph
                 self.samples = samples
-                self.sampled_graphs = list[0]
+                self.sampled_graphs = set([0])
             else:
                 # Multiple graphs
                 assert samples is not None and len(samples) > 0
                 self.samples = []
-                self.sampled_graphs = samples
+                self.sampled_graphs = set(samples)
 
                 for graph_id in samples:
                     start_idx = sum(self.properties["graph_sizes"][:graph_id])
@@ -460,6 +460,8 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
 
         # The property distances_alphabet is required for the SP features
         self.properties["distances_alphabet"] = list(range(2*self.k + 2))
+        # To denote disconnected label pairs
+        self.properties["distances_alphabet"].append(-1)
         
         self.title_str = f"{self.k}-Disk SP features"
 
@@ -587,6 +589,8 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
 
         # The property distances_alphabet is required for the SP features
         self.properties["distances_alphabet"] = list(range(2*self.s + 2))
+        # We add -1 to the possible distances to denote a pair of labels which are disconnected.
+        self.properties["distances_alphabet"].append(-1)
         
         self.title_str = f"{self.r}-{self.s}-Ring SP features"
 
@@ -793,15 +797,15 @@ def run_molhiv():
     dataset_molhiv._data.x = torch.zeros((dataset_molhiv._data.x.size()[0], 1), dtype = torch.long)
     
     k = 6
-    r = 2
-    s = 4
+    r = 3
+    s = 6
     dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_MOLHIV.svmlight"
     dataset_write_filename_k_disk = f"{k}_disk_SP_features_MOLHIV.svmlight"
 
     # split_idx["train"]
 
-    # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
-    sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = split_idx["train"], dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
+    sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_molhiv, r = r, s = s, node_pred = False, samples = split_idx["train"], dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
+    #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = split_idx["train"], dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
 
 
     # Debugging purposes
@@ -820,7 +824,7 @@ def run_molhiv():
 
     print('Multi process performance: ')
     ts_multi = time.time_ns()
-    sp_gen.generate_features(num_processes = 8, chunksize = 128, comment = "SP 6-disk feature extraction for the mol-hiv dataset on 8 processes", log_times = False, dump_times = False, time_summary_path = molhiv_path)
+    sp_gen.generate_features(num_processes = 8, chunksize = 128, comment = None, log_times = False, dump_times = False, time_summary_path = molhiv_path)
     time_multi = (time.time_ns() - ts_multi) / 1_000_000
     print('Multi threaded time: ' + str(time_multi))
 

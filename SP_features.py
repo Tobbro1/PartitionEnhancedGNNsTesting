@@ -52,7 +52,13 @@ class SP_graph_features():
             for j in range(i):
                 _llist = [x[i].item(), x[j].item()]
                 _llist.sort()
-                _t = tuple([tuple(_llist), int(distances[i][j])])
+                
+                # If there is no connection between two vertices i and j. This can occur especially in r-s-rings. In this case, we assign them distance -1, since this is still usefull information
+                if distances[i][j] == float('inf'):
+                    _t = tuple([tuple(_llist), int(-1)])
+                else:
+                    _t = tuple([tuple(_llist), int(distances[i][j])])
+
                 if _t not in _tupledict:
                     _tupledict[_t] = 1
                 else:
