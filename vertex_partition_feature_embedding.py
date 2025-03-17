@@ -154,7 +154,7 @@ class TimeLoggingEvent(Enum):
     gen_r_s_ring = 2
     floyd_warshall = 3
     SP_vector_computation = 4
-    store_sp_vector_memory = 5
+    get_database_idx = 5
 
 
 # Superclass implementing some basic logging and property extraction functionality
@@ -163,7 +163,7 @@ class Feature_Generator():
 
     # NOTE: dataset._data.x must NOT be set to None to ensure proper function and num_features must be at least 1. In the unlabeled case, x should simply be set to the constant 0 vector.
     # samples defines the indices of the vertices in the dataset that should be considered.
-    def __init__(self, dataset: Dataset, node_pred: bool, samples: Optional[List[int]], dataset_write_path: str, dataset_write_filename: str, result_mmap_dest: str, editmask_mmap_dest: str, properties_path: Optional[str] = None, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None):
+    def __init__(self, dataset: Dataset, node_pred: bool, samples: Optional[List[int]] | Optional[Tensor], dataset_write_path: str, dataset_write_filename: str, result_mmap_dest: str, editmask_mmap_dest: str, properties_path: Optional[str] = None, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None):
         super().__init__()
 
         self.dataset = dataset
@@ -232,78 +232,184 @@ class Feature_Generator():
         self.shared_dataset_result_shape = None
         self.shared_dataset_result_mmap_dest = None
 
+        # Variables that need to be initialized by the subclasses
         # An editmask for the computed dataset (utilised in cropping)
         self.shared_editmask_dtype = None
         self.shared_editmask_shape = None
         self.shared_editmask_mmap_dest = None
 
+        # Variables that need to be initialized by the subclasses
         # String describing the computed features
         self.title_str = None
 
-        # Dictionary that will be filled with times if time logging is enabled
+
+        # Used in dictionary that will be filled with times if time logging is enabled
         self.num_events = len(TimeLoggingEvent)
+
+        # Nature of the prediction task
+        self.node_pred = node_pred
+
+        # A dictionary utilised to speed up index computation methods. 
+        # In the node prediction setting this corresponds to a map dataset_idx -> database_idx with entries for every dataset_idx contained in samples.
+        # In the graph prediction setting this corresponds to a map dataset_idx -> graph_id, vertex_id with entries for every dataset_idx contained in the graphs in samples
+        self.dataset_idx_lookup = {}
+
+        # A dictionary containing key-value pairs of the form {graph_id: database_start_idx} giving the starting idx of vertices of the given graph in the database. 
+        # This does not correspond to the idx in the dataset. This is used to efficiently compute a database_vertex_idx from a graph_id.
+        # Only utilised in the graph prediction setting
+        self.database_graph_start_idx = None
 
         if samples is None:
             # We compute the feature vectors for the whole dataset
-            self.samples = list(range(self.properties["num_vertices"]))
-            self.sampled_graphs = set(range(self.properties["graph_sizes"].size))
-        else:
+            self.samples = []
+
             if node_pred:
-                # Only one graph
-                self.samples = samples
-                self.sampled_graphs = set([0])
+                # One graph
+                for dataset_idx in range(self.properties["num_vertices"]):
+                    self.dataset_idx_lookup[dataset_idx] = dataset_idx
+                    self.samples.append(dataset_idx)
+            else:
+                # Multiple graphs
+                self.database_graph_start_idx = {}
+
+                graph_id = 0
+                cur_start_idx = 0
+                self.database_graph_start_idx[0] = 0
+                for dataset_idx in range(self.properties["num_vertices"]):
+                    if (dataset_idx - cur_start_idx) == int(self.properties["graph_sizes"][graph_id]):
+                        graph_id += 1
+                        cur_start_idx = dataset_idx
+                        self.database_graph_start_idx[graph_id] = dataset_idx
+
+                    self.dataset_idx_lookup[dataset_idx] = tuple([graph_id, dataset_idx - cur_start_idx])
+                    self.samples.append(dataset_idx)
+
+        else:
+            if torch.is_tensor(samples):
+                samples = samples.tolist()
+
+            assert len(samples) > 0
+
+            if node_pred:
+                # One graph
+                self.samples = []
+
+                # Pre-compute the dataset_idx_lookup dictionary, a map representing dataset_idx -> database_idx
+                for dataset_idx in samples:
+                    self.dataset_idx_lookup[dataset_idx] = len(self.samples)
+                    self.samples.append(dataset_idx)
+
             else:
                 # Multiple graphs
                 assert samples is not None and len(samples) > 0
                 self.samples = []
-                self.sampled_graphs = set(samples)
 
+                self.database_graph_start_idx = {}
+
+                # We compute a list of the vertices included in the graphs (defined by the graph_ids in samples). Additionaly we store the start_idx property to efficiently compute the inverse of this operation via look-up.
                 for graph_id in samples:
-                    start_idx = sum(self.properties["graph_sizes"][:graph_id])
-                    num_nodes = self.properties["graph_sizes"][graph_id]
-                    self.samples.extend(list(range(start_idx, start_idx + num_nodes)))
-        
+                    start_idx = int(sum(self.properties["graph_sizes"][:graph_id]))
 
-    #helpers for indexing and editing of the database array. NOTE: The database idx is the idx used to store results, not in the dataset itself (which would be the dataset idx).
-    def get_vertex_identifier_from_database_idx(self, database_idx: int) -> Tuple[int, int]:
-        cur_graph_id = 0
-        idx = database_idx
-        for size in self.properties["graph_sizes"][self.sampled_graphs]:
-        #for size in self.properties["graph_sizes"]:
-            size = int(size)
-            if idx >= size:
-                idx -= size
-                cur_graph_id += 1
-            else:
-                return tuple([cur_graph_id, idx])
+                    # Store database_start_idx for a given graph. This is given by the length of the sample list before adding the vertices of the given graph.
+                    assert graph_id not in self.database_graph_start_idx
+                    self.database_graph_start_idx[graph_id] = len(self.samples)
+
+                    # Refine samples
+                    num_nodes = int(self.properties["graph_sizes"][graph_id])
+                    self.samples.extend(list(range(start_idx, start_idx + num_nodes)))
+
+                    # Pre-compute the dataset_idx_lookup dictionary
+                    for dataset_idx in range(start_idx, start_idx + num_nodes):
+                        self.dataset_idx_lookup[dataset_idx] = tuple([graph_id, dataset_idx - start_idx])
+
+        
+    # NOTE: currently unused
+    # #helpers for indexing and editing of the database array. NOTE: The database idx is the idx used to store results, not in the dataset itself (which would be the dataset idx).
+    # def get_vertex_identifier_from_database_idx(self, database_idx: int) -> Tuple[int, int]:
+    #     cur_graph_id = 0
+    #     idx = database_idx
+    #     for size in self.properties["graph_sizes"][self.sampled_graphs]:
+    #         size = int(size)
+    #         if idx >= size:
+    #             idx -= size
+    #             cur_graph_id += 1
+    #         else:
+    #             return tuple([cur_graph_id, idx])
     
     # Helper to get the graph_id and vertex_id from a dataset idx. NOTE: The dataset idx is the idx used in the dataset, not in the tensor used to store results (which would be the database idx).
     def get_vertex_identifier_from_dataset_idx(self, dataset_idx: int) -> Tuple[int, int]:
-        cur_graph_id = 0
-        idx = dataset_idx
-        for size in self.properties["graph_sizes"]:
-            size = int(size)
-            if idx >= size:
-                idx -= size
-                cur_graph_id += 1
-            else:
-                return tuple([cur_graph_id, idx])
+        
+        if self.node_pred:
+            return tuple([0, dataset_idx])
+        else:
+            # We use a pre-computed dictionary representing dataset_idx -> graph_id, vertex_id to speed up the computation
+            return self.dataset_idx_lookup[dataset_idx]
+        
+        # cur_graph_id = 0
+        # idx = dataset_idx
+        # for size in self.properties["graph_sizes"]:
+        #     size = int(size)
+        #     if idx >= size:
+        #         idx -= size
+        #         cur_graph_id += 1
+        #     else:
+        #         return tuple([cur_graph_id, idx])
 
-    def get_database_idx_from_vertex_identifier(self, vertex_identifier: Tuple[int,int]) -> int:      
-        graphs = [x for x in range(vertex_identifier[0]) if x in self.sampled_graphs]
-        return int(sum(self.properties["graph_sizes"][graphs]) + vertex_identifier[1])
-        #return int(sum(self.properties["graph_sizes"][:vertex_identifier[0]]) + vertex_identifier[1])
+    # NOTE: In the node prediction scenario this method currently does not support computing a sample of the vertices of the dataset.
+    def get_database_idx_from_vertex_identifier(self, vertex_identifier: Tuple[int,int]) -> int:   
+    
+        if self.node_pred:
+            # Only one graph
+            # vertex_identifier[1] is the dataset_idx of the given vertex. We use dataset_idx_lookup; a dictionary representing a map dataset_idx -> database_idx directly
+            return self.dataset_idx_lookup[vertex_identifier[1]]
+        else:
+            # Multiple graphs, vertex_identifier[0] represents the graph_id and vertex_identifier[1] represents the idx of the vertex within the graph. Utilise graph_start_idx as a lookup method
+            assert self.database_graph_start_idx is not None and vertex_identifier[0] in self.database_graph_start_idx
+
+            return self.database_graph_start_idx[vertex_identifier[0]] + vertex_identifier[1]
+
+        # # In the graph prediction setting, this function is sped up using a lookup of pre-computed vertex ranges
+        # start = time.time()
+        # graphs = [x for x in range(vertex_identifier[0]) if x in self.sampled_graphs]
+        # result = int(sum(self.properties["graph_sizes"][graphs]) + vertex_identifier[1])
+        # print(time.time() - start)
+        # return result
+        # #return int(sum(self.properties["graph_sizes"][:vertex_identifier[0]]) + vertex_identifier[1])
     
     #NOTE: this method requires a fully edited vector, meaning it has to already include the graph_id and vertex_id of the specific feature vector
     def edit_database_result_by_index(self, database_idx: int, vector: np.array):
-        #assert vector.shape == self.shared_dataset_result[0,:].shape
         #assert vector.shape[0] == self.shared_dataset_result_shape[1]
-        #assert 0 <= dataset_idx and dataset_idx < self.shared_dataset_result[:,0].shape[0]
         #assert 0 <= database_idx and database_idx < self.shared_dataset_result_shape[0]
 
         shared_dataset_result = np.memmap(self.shared_dataset_result_mmap_dest, dtype = self.shared_dataset_result_dtype, mode = 'r+', shape = self.shared_dataset_result_shape)
         shared_dataset_result[database_idx,:] = vector
         shared_dataset_result.flush()
+
+    # NOTE: this method requires a fully edited vector, meaning it has to already include the graph_id and vertex_id of the specific feature vector
+    # Works with an array of indices and an array of vectors
+    def edit_database_result_by_indices(self, database_idx: np.array, vectors: np.array, editmask: np.array, count: Optional[int] = None):
+
+        if count is None:
+            # A complete batch should be stored
+            shared_dataset_result = np.memmap(self.shared_dataset_result_mmap_dest, dtype = self.shared_dataset_result_dtype, mode = 'r+', shape = self.shared_dataset_result_shape)
+            shared_dataset_result[database_idx,:] = vectors[:]
+            shared_dataset_result.flush()
+
+            # Edit the editmask in the same step
+            editmask_mmap = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+            editmask_mmap[:] = np.logical_or(editmask_mmap, editmask)
+            editmask_mmap.flush()
+        else:
+            # Only the first count elements should be stored
+            shared_dataset_result = np.memmap(self.shared_dataset_result_mmap_dest, dtype = self.shared_dataset_result_dtype, mode = 'r+', shape = self.shared_dataset_result_shape)
+            shared_dataset_result[database_idx[:count],:] = vectors[:count,:]
+            shared_dataset_result.flush()
+
+            # Edit the editmask in the same step
+            editmask_mmap = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+            editmask_mmap[:] = np.logical_or(editmask_mmap, editmask)
+            editmask_mmap.flush()
+
 
     # NOTE: This method has to be overwritten by any subclass
     def compute_feature(self, vertex_idx: int):
@@ -315,24 +421,63 @@ class Feature_Generator():
     
     # generate features of all vertices and store them on disk
     # NOTE: specifying a chunksize greater than 1 might increase the lag (esp of the progress bar) but often times yields a much faster computation speed and is highly advised
-    def generate_features(self, chunksize: int = 1, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):
+    def generate_features(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):
 
         assert num_processes > 0
         assert self.samples is not None and len(self.samples) > 0
 
         start_time = time.time()
 
+        vector_buffer = np.zeros(shape = (vector_buffer_size, self.shared_dataset_result_shape[1]), dtype = self.shared_dataset_result_dtype)
+        vector_buffer_count = 0
+        index_buffer = np.zeros(shape = (vector_buffer_size), dtype = int)
+        editmask_buffer = np.full(shape = self.shared_editmask_shape, dtype = self.shared_editmask_dtype, fill_value = False)
+
         pool = multiprocessing.Pool(processes = num_processes)
         if log_times:
             self.times = np.full(shape = (len(self.samples), self.num_events), dtype = np.float32, fill_value = -1)
 
+            completed = 0
+            num_samples = len(self.samples)
+
             # Store the time results
-            for time_res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, self.samples, chunksize = chunksize), total = len(self.samples)):
-                self.times[time_res[0],:] = time_res[1][:]
+            for vector_res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, self.samples, chunksize = chunksize), total = len(self.samples)):
+                # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of 256 vectors in the main process
+                # vector_res is in the shape of database_idx, vector
+                index_buffer[vector_buffer_count] = vector_res[0]
+                vector_buffer[vector_buffer_count,:] = vector_res[1]
+                vector_buffer_count += 1
+                completed += 1
+                editmask_buffer[:] = np.logical_or(editmask_buffer, vector_res[2])
+
+                if vector_buffer_count == vector_buffer_size:
+                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer)
+                    vector_buffer_count = 0
+                elif completed == num_samples:
+                    # Remaining tasks completed successfully but are not yet stored
+                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
+
+                self.times[vector_res[0],:] = vector_res[3][:]
         else:
-            # The for loop is required for tqdm to work properly
-            for _ in tqdm.tqdm(pool.imap_unordered(self.compute_feature, self.samples, chunksize = chunksize), total = len(self.samples)):
-                continue
+            completed = 0
+            num_samples = len(self.samples)
+
+            for vector_res in tqdm.tqdm(pool.imap_unordered(self.compute_feature, self.samples, chunksize = chunksize), total = num_samples):
+                # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of vector_buffer_size vectors in the main process
+                # vector_res is in the shape of database_idx, vector
+                index_buffer[vector_buffer_count] = vector_res[0]
+                vector_buffer[vector_buffer_count,:] = vector_res[1]
+                vector_buffer_count += 1
+                completed += 1
+                editmask_buffer[:] = np.logical_or(editmask_buffer, vector_res[2])
+
+                if vector_buffer_count == vector_buffer_size:
+                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer)
+                    vector_buffer_count = 0
+                elif completed == num_samples:
+                    # Remaining tasks completed successfully but are not yet stored
+                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
+
         pool.close()
         pool.join()
 
@@ -496,7 +641,8 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
         self.sp_features = spf.SP_graph_features(label_alphabet = self.properties["label_alphabet"], distances_alphabet = self.properties["distances_alphabet"], graph_sizes = self.properties["graph_sizes"])
 
     # Start method of a new process
-    # Compute the k-disk SP feature vector for a single data point
+    # Compute the k-disk SP feature vector for a single data point.
+    # vertex_idx is a dataset_idx, NOT a database_idx
     def compute_feature(self, vertex_idx: int):
         #get the graph associated with vertex_idx
         vertex_identifier = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
@@ -514,9 +660,12 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
         sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = k_disk.x)
         result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = vertex_identifier)
 
-        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
-        editmask[:] = np.logical_or(editmask, editmask_res)
-        self.edit_database_result_by_index(database_idx = self.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier), vector = result)
+        # editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        # editmask[:] = np.logical_or(editmask, editmask_res)
+        database_idx = self.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier)
+        #self.edit_database_result_by_index(database_idx = database_idx, vector = result)
+
+        return database_idx, result, editmask_res
 
     # Start method of a new process
     # Compute the k-disk SP feature vector for a single data point with logging the times using the log_time() method
@@ -556,19 +705,19 @@ class K_Disk_SP_Feature_Generator(Feature_Generator):
 
         save_res_start = time.time()
         # editmask_start = time.time()
-        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
-        editmask[:] = np.logical_or(editmask, editmask_res)
+        # editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        # editmask[:] = np.logical_or(editmask, editmask_res)
         # editmask_time = time.time() - editmask_start
         # index_calc_start = time.time()
         database_idx = self.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier)
         # index_calc_time = time.time() - index_calc_start
         # databasewrite_start = time.time()
-        self.edit_database_result_by_index(database_idx = database_idx, vector = result)
+        #self.edit_database_result_by_index(database_idx = database_idx, vector = result)
         # databasewrite_time = time.time()-databasewrite_start
         save_res_time = time.time() - save_res_start
-        self.log_time(event = TimeLoggingEvent.store_sp_vector_memory, value = save_res_time)
+        self.log_time(event = TimeLoggingEvent.get_database_idx, value = save_res_time)
 
-        return database_idx, self.times
+        return database_idx, result, editmask_res, self.times
 
 class R_S_Ring_SP_Feature_Generator(Feature_Generator):
 
@@ -643,9 +792,12 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
         sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = r_s_ring.x)
         result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = vertex_identifier)
 
-        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
-        editmask[:] = np.logical_or(editmask, editmask_res)
-        self.edit_database_result_by_index(database_idx = self.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier), vector = result)
+        # editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        # editmask[:] = np.logical_or(editmask, editmask_res)
+        database_idx = self.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier)
+        #self.edit_database_result_by_index(database_idx = database_idx, vector = result)
+
+        return database_idx, result, editmask_res
 
     # Start method of a new process
     # Compute the r-s-ring SP feature vector for a single data point with logging the times using the log_time() method
@@ -682,14 +834,14 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
         self.log_time(event = TimeLoggingEvent.SP_vector_computation, value = sp_map_time)
 
         save_res_start = time.time()
-        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
-        editmask[:] = np.logical_or(editmask, editmask_res)
+        # editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        # editmask[:] = np.logical_or(editmask, editmask_res)
         database_idx = self.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier)
-        self.edit_database_result_by_index(database_idx = database_idx, vector = result)
+        #self.edit_database_result_by_index(database_idx = database_idx, vector = result)
         save_res_time = time.time() - save_res_start
-        self.log_time(event= TimeLoggingEvent.store_sp_vector_memory, value = save_res_time)
+        self.log_time(event= TimeLoggingEvent.get_database_idx, value = save_res_time)
 
-        return database_idx, self.times
+        return database_idx, result, editmask_res, self.times
 
 #test zone
 
@@ -804,7 +956,7 @@ def run_molhiv():
 
     # split_idx["train"]
 
-    sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_molhiv, r = r, s = s, node_pred = False, samples = split_idx["train"], dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
+    sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_molhiv, r = r, s = s, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
     #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = split_idx["train"], dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
 
 
@@ -822,9 +974,12 @@ def run_molhiv():
     # helpers.drawGraph(graph = graph, figure_count=3)
     # plt.show()
 
+    # vector_buffer_size = 16_384
+    # vector_buffer_size = 4096
+
     print('Multi process performance: ')
     ts_multi = time.time_ns()
-    sp_gen.generate_features(num_processes = 8, chunksize = 128, comment = None, log_times = False, dump_times = False, time_summary_path = molhiv_path)
+    sp_gen.generate_features(num_processes = 8, chunksize = 128, vector_buffer_size = 16_384, comment = None, log_times = False, dump_times = False, time_summary_path = molhiv_path)
     time_multi = (time.time_ns() - ts_multi) / 1_000_000
     print('Multi threaded time: ' + str(time_multi))
 
@@ -860,7 +1015,7 @@ if __name__ == '__main__':
     # print(dataset_proteins[0])
 
     # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_proteins, k = 3, dataset_write_path = proteins_path, dataset_write_filename = "k_disk_SP_features_PROTEINS.svmlight", result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = protein_properties_path, write_properties_root_path = proteins_path, write_properties_filename = filename)
-    
+
     # #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_dd, k = 3, dataset_write_path = dd_path, dataset_write_filename = "k_disk_SP_features_DD.svmlight", result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = osp.join(dd_path, filename), write_properties_root_path = dd_path, write_properties_filename = filename)
     # #
     # #  print('Single process performance: ')
