@@ -137,6 +137,7 @@ class Feature_Generator():
         if samples is None:
             # We compute the feature vectors for the whole dataset
             self.samples = []
+            self.graph_samples = []
 
             if node_pred:
                 # One graph
@@ -147,18 +148,19 @@ class Feature_Generator():
                 # Multiple graphs
                 self.database_graph_start_idx = {}
 
+                self.graph_samples.append(0)
                 graph_id = 0
                 cur_start_idx = 0
                 self.database_graph_start_idx[0] = 0
                 for dataset_idx in range(self.properties["num_vertices"]):
                     if (dataset_idx - cur_start_idx) == int(self.properties["graph_sizes"][graph_id]):
                         graph_id += 1
+                        self.graph_samples.append(graph_id)
                         cur_start_idx = dataset_idx
                         self.database_graph_start_idx[graph_id] = dataset_idx
 
                     self.dataset_idx_lookup[dataset_idx] = tuple([graph_id, dataset_idx - cur_start_idx])
                     self.samples.append(dataset_idx)
-
         else:
             if torch.is_tensor(samples):
                 samples = samples.tolist()
@@ -178,6 +180,7 @@ class Feature_Generator():
                 # Multiple graphs
                 assert samples is not None and len(samples) > 0
                 self.samples = []
+                self.graph_samples = samples
 
                 self.database_graph_start_idx = {}
 
@@ -254,19 +257,29 @@ class Feature_Generator():
 
 
     # NOTE: This method has to be overwritten by any subclass
-    def compute_feature(self, vertex_idx: int):
+    def compute_feature(self, idx: int):
         raise NotImplementedError
     
     # Utilised for analysis of runtimes, might include significant memory and calculation time overhead
-    def compute_feature_log_times(self, vertex_idx: int):
+    def compute_feature_log_times(self, idx: int):
         raise NotImplementedError
     
     # generate features of all vertices and store them on disk
+    # graph_mode specifies whether the graphs are scheduled as tasks or their respective vertices. This is relevant if parts of the calculation can be used for the whole graph (e.g. for vertex SP features)
     # NOTE: specifying a chunksize greater than 1 might increase the lag (esp of the progress bar) but often times yields a much faster computation speed and is highly advised
-    def generate_features(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):
+    def generate_features(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None, graph_mode: bool = False):
 
         assert num_processes > 0
         assert self.samples is not None and len(self.samples) > 0
+
+        # We cannot schedule via graphs if there is only one graph available
+        if self.node_pred:
+            graph_mode = False
+
+        if graph_mode:
+            samples = self.graph_samples
+        else:
+            samples = self.samples
 
         start_time = time.time()
 
@@ -280,45 +293,56 @@ class Feature_Generator():
             self.times = np.full(shape = (len(self.samples), self.num_events), dtype = np.float32, fill_value = -1)
 
             completed = 0
-            num_samples = len(self.samples)
+            num_samples = len(samples)
 
             # Store the time results
-            for vector_res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, self.samples, chunksize = chunksize), total = len(self.samples)):
-                # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of 256 vectors in the main process
-                # vector_res is in the shape of database_idx, vector
-                index_buffer[vector_buffer_count] = vector_res[0]
-                vector_buffer[vector_buffer_count,:] = vector_res[1]
-                vector_buffer_count += 1
-                completed += 1
-                editmask_buffer[:] = np.logical_or(editmask_buffer, vector_res[2])
+            for res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, samples, chunksize = chunksize), total = len(self.samples)):
+                if graph_mode:
+                    # res is in the shape of database_idx: array of database indices edited, result: vectors for the given indices, editmask_res: editmask result of the whole graph
+                    # We do not buffer in this case.
+                    self.edit_database_result_by_indices(database_idx = res[0], vectors = res[1], editmask = res[2])
+                    self.times[res[0],:] = res[3][:]
+                else:
+                    # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of 256 vectors in the main process
+                    # vector_res is in the shape of database_idx, vector
+                    index_buffer[vector_buffer_count] = res[0]
+                    vector_buffer[vector_buffer_count,:] = res[1]
+                    vector_buffer_count += 1
+                    completed += 1
+                    editmask_buffer[:] = np.logical_or(editmask_buffer, res[2])
 
-                if vector_buffer_count == vector_buffer_size:
-                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer)
-                    vector_buffer_count = 0
-                elif completed == num_samples:
-                    # Remaining tasks completed successfully but are not yet stored
-                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
+                    if vector_buffer_count == vector_buffer_size:
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer)
+                        vector_buffer_count = 0
+                    elif completed == num_samples:
+                        # Remaining tasks completed successfully but are not yet stored
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
 
-                self.times[vector_res[0],:] = vector_res[3][:]
+                    self.times[res[0],:] = res[3][:,:]
         else:
             completed = 0
-            num_samples = len(self.samples)
+            num_samples = len(samples)
 
-            for vector_res in tqdm.tqdm(pool.imap_unordered(self.compute_feature, self.samples, chunksize = chunksize), total = num_samples):
-                # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of vector_buffer_size vectors in the main process
-                # vector_res is in the shape of database_idx, vector
-                index_buffer[vector_buffer_count] = vector_res[0]
-                vector_buffer[vector_buffer_count,:] = vector_res[1]
-                vector_buffer_count += 1
-                completed += 1
-                editmask_buffer[:] = np.logical_or(editmask_buffer, vector_res[2])
+            for res in tqdm.tqdm(pool.imap_unordered(self.compute_feature, samples, chunksize = chunksize), total = num_samples):
+                if graph_mode:
+                    # res is in the shape of database_idx: array of database indices edited, result: vectors for the given indices, editmask_res: editmask result of the whole graph
+                    # We do not buffer in this case.
+                    self.edit_database_result_by_indices(database_idx = res[0], vectors = res[1], editmask = res[2])
+                else:
+                    # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of vector_buffer_size vectors in the main process
+                    # vector_res is in the shape of database_idx, vector
+                    index_buffer[vector_buffer_count] = res[0]
+                    vector_buffer[vector_buffer_count,:] = res[1]
+                    vector_buffer_count += 1
+                    completed += 1
+                    editmask_buffer[:] = np.logical_or(editmask_buffer, res[2])
 
-                if vector_buffer_count == vector_buffer_size:
-                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer)
-                    vector_buffer_count = 0
-                elif completed == num_samples:
-                    # Remaining tasks completed successfully but are not yet stored
-                    self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
+                    if vector_buffer_count == vector_buffer_size:
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer)
+                        vector_buffer_count = 0
+                    elif completed == num_samples:
+                        # Remaining tasks completed successfully but are not yet stored
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
 
         pool.close()
         pool.join()

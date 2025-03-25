@@ -13,7 +13,7 @@ from torch_geometric.data import Data
 
 from torch_geometric.datasets import TUDataset
 import os.path as osp
-import developmentHelpers as helpers
+import vertex_partition_feature_embedding.developmentHelpers as helpers
 import matplotlib.pyplot as plt
 
 #Adaptation of the WLConv in the standard torch_geometric convolutions to implement the 2-WL algorithm

@@ -8,9 +8,9 @@ from torch_geometric.data import Dataset
 import numpy as np
 
 #import own functionality
-from vertex_partition_feature_embedding.feature_generator import Feature_Generator, TimeLoggingEvent
+from feature_generator import Feature_Generator, TimeLoggingEvent
 from util import gen_r_s_ring
-import vertex_partition_feature_embedding.SP_features as spf
+import SP_features as spf
 
 class R_S_Ring_SP_Feature_Generator(Feature_Generator):
 
@@ -68,9 +68,9 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
 
     # Start method of a new process
     # Compute the r-s-ring SP feature vector for a single data point
-    def compute_feature(self, vertex_idx: int):
+    def compute_feature(self, idx: int):
         #get the graph associated with vertex_idx
-        vertex_identifier = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
+        vertex_identifier = self.get_vertex_identifier_from_dataset_idx(idx)
         graph_id = vertex_identifier[0]
         vertex_id = vertex_identifier[1]
         cur_graph = self.dataset.get(graph_id)
@@ -92,12 +92,12 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
     # Start method of a new process
     # Compute the r-s-ring SP feature vector for a single data point with logging the times using the log_time() method
     # NOTE: logging the computation times is significantly slower than running the computation without, thus this method should only be utilised on a limited amount of vertices
-    def compute_feature_log_times(self, vertex_idx: int):
+    def compute_feature_log_times(self, idx: int):
         self.times = np.full(shape = (self.num_events), dtype = np.float32, fill_value = -1)
 
         #get the graph associated with vertex_idx
         get_graph_start = time.time()
-        vertex_identifier = self.get_vertex_identifier_from_dataset_idx(vertex_idx)
+        vertex_identifier = self.get_vertex_identifier_from_dataset_idx(idx)
         graph_id = vertex_identifier[0]
         vertex_id = vertex_identifier[1]
         cur_graph = self.dataset.get(graph_id)

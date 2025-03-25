@@ -14,7 +14,7 @@ from torch_geometric.utils import (
 
 from torch_geometric.datasets import TUDataset
 import os.path as osp
-import developmentHelpers as helpers
+import vertex_partition_feature_embedding.developmentHelpers as helpers
 import matplotlib.pyplot as plt
 
 """@torch.no_grad()

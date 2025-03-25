@@ -17,17 +17,10 @@ import matplotlib.pyplot as plt
 
 class SP_graph_features():
 
-    def __init__(self, label_alphabet: List[int], distances_alphabet: List[int], graph_sizes: Optional[List[int]] = None):
+    def __init__(self, label_alphabet: List[int], distances_alphabet: List[int]):
         super().__init__()
         self.label_alphabet = label_alphabet
         self.distances_alphabet = distances_alphabet
-        self.graph_sizes = graph_sizes
-        #editmask represents a mask of which entries have been edited by vectors in order to efficiently crop the final vectors. It is important that entries of this array are only ever set to true in order to prevent race conditions when parallelizing
-        #self.editmask = np.full(((len(label_alphabet)**2) * len(distances_alphabet)) + 2, False)
-        #graph_id and vertex_id
-        #self.editmask[0] = True
-        #self.editmask[1] = True
-        #self.dataset = np.full((num_samples, ((len(label_alphabet)**2) * len(distances_alphabet)) + 2), 0, dtype = np.int32)
 
     #directly utilise the networkx implementation of floyd_warshall to construct a distance matrix between the vertices
     def floyd_warshall(self, graph: Data) -> np.array:
@@ -87,34 +80,67 @@ class SP_graph_features():
         return tuple([result, editmask])
 
 
-#TODO: Implement cropping etc
-#computes the vertex sp feature map, that is result_(l,d) with label l and distance d is the number of vertices with label l and distance d to the vertex v
-#NOTE: this implementation is intended for undirected graphs and will not work with directed graphs. Thus it is assumed that the distances matrix is symmetric. 
-def vertex_sp_feature_map(distances: np.array, x: Tensor, vertex_id: int) -> Dict[Tuple[int, int], int]:
+class SP_vertex_features():
 
-    #if the features are not labels they are assumed to be a one-hot encoding
-    if x.size(1) > 1:
-        assert (x.sum(dim=1) == 1).sum() == x.size(0)
-        x = x.argmax(dim=1)  # one-hot -> integer.
-    assert x.dtype == torch.long
-    assert distances.shape == (x.size(0), x.size(0))
-    assert vertex_id in range(x.size(0))
+    # Computes vertex SP features, requiring the whole graph
+    def __init__(self, label_alphabet: List[int], distances_alphabet: List[int]):
+        super().__init__()
+        self.label_alphabet = label_alphabet
+        self.distances_alphabet = distances_alphabet
 
-    _dict = {}
+    #directly utilise the networkx implementation of floyd_warshall to construct a distance matrix between the vertices
+    def floyd_warshall(self, graph: Data) -> np.array:
+        return nx.floyd_warshall_numpy(torch_geometric.utils.to_networkx(graph))
 
-    for i in range(x.size(0)):
-        if i==vertex_id:
-            continue
+    #computes the vertex sp feature map, that is result_(l,d) with label l and distance d is the number of vertices with label l and distance d to the vertex v
+    #NOTE: this implementation is intended for undirected graphs and will not work with directed graphs. Thus it is assumed that the distances matrix is symmetric. 
+    def vertex_sp_feature_map(self, distances: np.array, x: Tensor, vertex_id: int) -> Dict[Tuple[int, int], int]:
 
-        _t = tuple([x[i].item(), int(distances[vertex_id, i])])
-        if _t not in _dict:
-            _dict[_t] = 1
-        else:
-            _dict[_t] += 1
+        #if the features are not labels they are assumed to be a one-hot encoding
+        if x.size(1) > 1:
+            assert (x.sum(dim=1) == 1).sum() == x.size(0)
+            x = x.argmax(dim=1)  # one-hot -> integer.
+        assert x.dtype == torch.long
+        assert distances.shape == (x.size(0), x.size(0))
 
-    return _dict
+        # Removed check for performance reasons
+        # assert vertex_id in range(x.size(0))
+
+        _dict = {}
+
+        for i in range(x.size(0)):
+            if i == vertex_id:
+                continue
+
+            distance = distances[vertex_id, i]
+            if distance == float('inf'):
+                distance = -1
+            _t = tuple([x[i].item(), int(distance)])
+            if _t not in _dict:
+                _dict[_t] = 1
+            else:
+                _dict[_t] += 1
+
+        return _dict
+    
+    def vertex_sp_feature_vector_from_map(self, dict: Dict[Tuple[int,int], int], vertex_identifier: Tuple[int, int]):
+
+        result = np.zeros(len(self.label_alphabet) * len(self.distances_alphabet) + 2)
+        editmask = np.full((len(self.label_alphabet) * len(self.distances_alphabet) + 2), False)
+
+        result[0] = vertex_identifier[0]
+        result[1] = vertex_identifier[1]
+
+        for i_l, l in enumerate(self.label_alphabet):
+            for i_d, d in enumerate(self.distances_alphabet):
+                id = i_l * len(self.label_alphabet) + i_d
+                key = tuple([l, d])
+                if key in dict:
+                    result[id + 2] = dict[key]
+                    editmask[id + 2] = True
 
 
+        return result, editmask
 
 #Test area
 #if __name__ == '__main__':

@@ -167,5 +167,8 @@ data/
 general_implementation_notes.txt
 dataset_notes.txt
 runtime_notes.txt
+#ignore some other files
+Lovacs_GraKeL.py
+testscript.py
 #ignore memmap files
 *.np

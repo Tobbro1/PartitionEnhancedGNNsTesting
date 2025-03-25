@@ -31,9 +31,10 @@ from sklearn import datasets
 
 #import own functionality
 import developmentHelpers as helpers
-import vertex_partition_feature_embedding.SP_features as spf
-from vertex_partition_feature_embedding.k_disk_sp_feature_generator import K_Disk_SP_Feature_Generator
-from vertex_partition_feature_embedding.r_s_ring_sp_feature_generator import R_S_Ring_SP_Feature_Generator
+import SP_features as spf
+from k_disk_sp_feature_generator import K_Disk_SP_Feature_Generator
+from r_s_ring_sp_feature_generator import R_S_Ring_SP_Feature_Generator
+from vertex_sp_feature_generator import Vertex_sp_feature_generator
 
 # OGB
 import ogb.nodeproppred as ogb_node
@@ -49,7 +50,7 @@ import matplotlib.pyplot as plt
 
 # Only for testing purposes
 def run_mutag():
-    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
+    path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir, 'data', 'TU')
     mutag_path = osp.join(path, "MUTAG")
     result_mmap_path = 'results.np'
     editmask_mmap_path = 'editmask.np'
@@ -76,7 +77,7 @@ def run_mutag():
 def run_products():
 
     # Testing the OGB data loader compatibility
-    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir, 'data', 'OGB')
     products_path = osp.join(path, "PRODUCTS")
     result_mmap_path = 'results.np'
     editmask_mmap_path = 'editmask.np'
@@ -106,7 +107,7 @@ def run_products():
 
 def run_arxiv():
     # Testing the OGB data loader compatibility
-    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir, 'data', 'OGB')
     arxiv_path = osp.join(path, "ARXIV")
     result_mmap_path = 'results.np'
     editmask_mmap_path = 'editmask.np'
@@ -136,7 +137,7 @@ def run_arxiv():
 
 def run_molhiv():
     # Testing the OGB data loader compatibility
-    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir, 'data', 'OGB')
     molhiv_path = osp.join(path, "MOL_HIV")
     result_mmap_path = 'results.np'
     editmask_mmap_path = 'editmask.np'
@@ -155,12 +156,13 @@ def run_molhiv():
     s = 6
     dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_MOLHIV.svmlight"
     dataset_write_filename_k_disk = f"{k}_disk_SP_features_MOLHIV.svmlight"
+    dataset_write_filename_vertex = f"Vertex_SP_features_MOLHIV.svmlight"
 
     # split_idx["train"]
 
-    sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_molhiv, r = r, s = s, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
-    #sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = split_idx["train"], dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
-
+    # sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_molhiv, r = r, s = s, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
+    # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
+    sp_gen = Vertex_sp_feature_generator(dataset = dataset_molhiv, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_vertex, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
 
     # Debugging purposes
     # graph_id, vertex_id = sp_gen.get_vertex_identifier_from_dataset_idx(83879)
@@ -179,9 +181,14 @@ def run_molhiv():
     # vector_buffer_size = 16_384
     # vector_buffer_size = 4096
 
+    # chunksize = 128
+
+    graph_mode = True
+
     print('Multi process performance: ')
     ts_multi = time.time_ns()
-    sp_gen.generate_features(num_processes = 8, chunksize = 128, vector_buffer_size = 16_384, comment = None, log_times = False, dump_times = False, time_summary_path = molhiv_path)
+    # sp_gen.generate_features(num_processes = 8, chunksize = 512, vector_buffer_size = 16_384, comment = None, log_times = False, dump_times = False, time_summary_path = molhiv_path)
+    sp_gen.generate_features(num_processes = 8, chunksize = 512, vector_buffer_size = 16_384, comment = None, log_times = False, dump_times = False, time_summary_path = molhiv_path, graph_mode = graph_mode)
     time_multi = (time.time_ns() - ts_multi) / 1_000_000
     print('Multi threaded time: ' + str(time_multi))
 
