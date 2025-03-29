@@ -192,6 +192,9 @@ def run_molhiv():
     time_multi = (time.time_ns() - ts_multi) / 1_000_000
     print('Multi threaded time: ' + str(time_multi))
 
+def run_exp():
+    raise NotImplementedError
+
 if __name__ == '__main__':
     #path = osp.join(osp.abspath(osp.dirname(__file__)), "data", "SP_features")
     # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')

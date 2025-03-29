@@ -170,5 +170,6 @@ runtime_notes.txt
 #ignore some other files
 Lovacs_GraKeL.py
 testscript.py
+2WL_features_backup.py
 #ignore memmap files
 *.np

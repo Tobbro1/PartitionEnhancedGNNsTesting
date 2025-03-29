@@ -31,6 +31,7 @@ class TimeLoggingEvent(Enum):
     floyd_warshall = 3
     SP_vector_computation = 4
     get_database_idx = 5
+    Two_WL_computation = 6
 
 # Superclass implementing some basic logging and property extraction functionality
 # NOTE: This class should be treated as an abstract class and is not intended to be directly initialized
@@ -266,8 +267,12 @@ class Feature_Generator():
     
     # generate features of all vertices and store them on disk
     # graph_mode specifies whether the graphs are scheduled as tasks or their respective vertices. This is relevant if parts of the calculation can be used for the whole graph (e.g. for vertex SP features)
+    # twoWL is necessary in case of computing 2WL features as the processes cannot return finished feature vectors since these would be inconsistent across processes, thus the parent process needs to do some additional processing.
     # NOTE: specifying a chunksize greater than 1 might increase the lag (esp of the progress bar) but often times yields a much faster computation speed and is highly advised
-    def generate_features(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None, graph_mode: bool = False):
+    def generate_features(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None, graph_mode: bool = False, two_WL: bool = False):
+
+        if two_WL:
+            return self.generate_features_two_WL(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, comment = comment, log_times = log_times, dump_times = dump_times, time_summary_path = time_summary_path, time_summary_filename = time_summary_filename)
 
         assert num_processes > 0
         assert self.samples is not None and len(self.samples) > 0
@@ -363,9 +368,86 @@ class Feature_Generator():
                 if dump_times:
                     self.dump_times(time_dump_path = time_summary_path)
 
+    # Analogous implementatio nto the normal generate_features function, put into its own function due to significant differences in post-processing
+    def generate_features_two_WL(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):
+        assert num_processes > 0
+        assert self.samples is not None and len(self.samples) > 0
+
+        samples = self.samples
+
+        # We cannot schedule via graphs if there is only one graph available
+        start_time = time.time()
+
+        # We store each result as a dictionary of type (database_vertex_id, (graph_id, vertex_id)) -> dict[color -> freq] (IN MEMORY)
+        color_freq_buffer = {}
+        unique_vals = set([])
+
+        pool = multiprocessing.Pool(processes = num_processes)
+        if log_times:
+            self.times = np.full(shape = (len(self.samples), self.num_events), dtype = np.float32, fill_value = -1)
+
+            num_samples = len(samples)
+
+            # Store the time results
+            for res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, samples, chunksize = chunksize), total = len(self.samples)):
+                # We store the result in the buffer dictionary
+                color_freq_buffer[tuple([res[0], res[1]])] = res[2]
+                unique_vals = unique_vals.union(set(res[2].keys()))
+
+                self.times[res[0],:] = res[3][:,:]
+        else:
+            num_samples = len(samples)
+
+            for res in tqdm.tqdm(pool.imap_unordered(self.compute_feature, samples, chunksize = chunksize), total = num_samples):
+                # We store the result in the buffer dictionary
+                color_freq_buffer[tuple([res[0], res[1]])] = res[2]
+                unique_vals = unique_vals.union(set(res[2].keys()))
+
+        pool.close()
+        pool.join()
+
+        # should only be called after the processes are joined again
+
+        # We need to post process the dictionary buffer and convert the color frequencies to vectors
+
+        # Ensure well defined order of the finished vectors:
+        unique_vals = list(unique_vals)
+        unique_vals.sort()
+
+        # Create a np array containing the results of shape |V|x|C|+2 where |C| is the number of unique colors computed by 2-WL on the dataset
+        result_database = np.full(shape = (len(samples), len(unique_vals) + 2), fill_value = -1, dtype = np.int64)
+
+        # All the unique colors generated values are stored in unique_vals
+        for v, color_freq in color_freq_buffer.items():
+            res = np.full(shape = (1, len(unique_vals) + 2), fill_value = -1, dtype = np.int64)
+            res[0] = v[1][0]
+            res[1] = v[1][1]
+            for color_idx, color in enumerate(unique_vals):
+                if color in color_freq:
+                    res[color_idx + 2] = color_freq[color]
+                else:
+                    res[color_idx + 2] = 0
+            
+            result_database[v[0],:] = res[:]
+
+        computation_time = time.time() - start_time
+
+        if comment is not None:
+            comment = self.title_str + "\n" + comment + f"\nComputation time: {computation_time}\n"
+        else:
+            comment = self.title_str + f"\nComputation time: {computation_time}\n"
+        
+        self.save_features(comment, use_mmap = False, result_database = result_database)
+
+        if log_times:
+            if time_summary_path != "":
+                self.calculate_time_summary(time_summary_path = time_summary_path, time_summary_filename = time_summary_filename)
+                if dump_times:
+                    self.dump_times(time_dump_path = time_summary_path)
+
     #NOTE: This function must only be called after joining parallelized processes to ensure correct function
     # Implements a simple cropping of the feature vectors 
-    def save_features(self, comment: Optional[str]):
+    def save_features(self, comment: Optional[str], use_mmap: bool = True, result_database: Optional[np.array] = None):
 
         if not osp.exists(self.dataset_path):
             os.makedirs(self.dataset_path)
@@ -374,13 +456,22 @@ class Feature_Generator():
         if not osp.exists(p):
             open(p, 'w').close()
 
-        dataset_result = np.memmap(self.shared_dataset_result_mmap_dest, dtype = self.shared_dataset_result_dtype, mode = 'r+', shape = self.shared_dataset_result_shape)
-        editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+        if not use_mmap:
+            assert result_database is not None
 
-        if comment is None:
-            datasets.dump_svmlight_file(X = dataset_result[:,editmask], y = np.zeros(len(self.samples)), f = p, comment = "")
+        if use_mmap:
+            dataset_result = np.memmap(self.shared_dataset_result_mmap_dest, dtype = self.shared_dataset_result_dtype, mode = 'r+', shape = self.shared_dataset_result_shape)
+            editmask = np.memmap(self.shared_editmask_mmap_dest, dtype = self.shared_editmask_dtype, mode = 'r+', shape = self.shared_editmask_shape)
+
+            if comment is None:
+                datasets.dump_svmlight_file(X = dataset_result[:,editmask], y = np.zeros(len(self.samples)), f = p, comment = "")
+            else:
+                datasets.dump_svmlight_file(X = dataset_result[:,editmask], y = np.zeros(len(self.samples)), f = p, comment = comment)
         else:
-            datasets.dump_svmlight_file(X = dataset_result[:,editmask], y = np.zeros(len(self.samples)), f = p, comment = comment)
+            if comment is None:
+                datasets.dump_svmlight_file(X = result_database[:,:], y = np.zeros(len(self.samples)), f = p, comment = "")
+            else:
+                datasets.dump_svmlight_file(X = result_database[:,:], y = np.zeros(len(self.samples)), f = p, comment = comment)
 
     # Helper to evaluate time complexity of individual operations
     def log_time(self, event: TimeLoggingEvent, value: float):

@@ -353,10 +353,7 @@ def test_partition_enhanced_GNN(gnn: Partition_enhanced_GNN, test_loader: DataLo
 if __name__ == '__main__':
 
     #reproducability
-    random.seed(constants.SEED)
-    np.random.seed(constants.SEED)
-    torch.manual_seed(constants.SEED)
-    torch.cuda.manual_seed_all(constants.SEED)
+    constants.initialize_random_seeds()
 
     torch.autograd.set_detect_anomaly(True)
 
