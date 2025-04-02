@@ -269,6 +269,7 @@ class Feature_Generator():
     # graph_mode specifies whether the graphs are scheduled as tasks or their respective vertices. This is relevant if parts of the calculation can be used for the whole graph (e.g. for vertex SP features)
     # twoWL is necessary in case of computing 2WL features as the processes cannot return finished feature vectors since these would be inconsistent across processes, thus the parent process needs to do some additional processing.
     # NOTE: specifying a chunksize greater than 1 might increase the lag (esp of the progress bar) but often times yields a much faster computation speed and is highly advised
+    # NOTE: In graph mode, the vector_buffer_size has to be larger than the largest graph
     def generate_features(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None, graph_mode: bool = False, two_WL: bool = False):
 
         if two_WL:
@@ -301,12 +302,34 @@ class Feature_Generator():
             num_samples = len(samples)
 
             # Store the time results
-            for res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, samples, chunksize = chunksize), total = len(self.samples)):
+            for res in tqdm.tqdm(pool.imap_unordered(self.compute_feature_log_times, samples, chunksize = chunksize), total = len(samples)):
                 if graph_mode:
                     # res is in the shape of database_idx: array of database indices edited, result: vectors for the given indices, editmask_res: editmask result of the whole graph
-                    # We do not buffer in this case.
-                    self.edit_database_result_by_indices(database_idx = res[0], vectors = res[1], editmask = res[2])
-                    self.times[res[0],:] = res[3][:]
+                    
+                    num_vec = res[0].shape[0]
+                    
+                    # Test whether remaining buffer space is sufficient, otherwise write the buffer and start it again
+                    if (vector_buffer_count + num_vec) >= vector_buffer_size:
+                        # space insufficient
+
+                        # write current buffer
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
+                        vector_buffer_count = 0
+                    
+                    # Write result in the buffer
+                    index_buffer[vector_buffer_count:vector_buffer_count + num_vec] = res[0]
+                    vector_buffer[vector_buffer_count:vector_buffer_count + num_vec,:] = res[1]
+                    vector_buffer_count += num_vec
+                    completed += num_vec
+                    editmask_buffer[:] = np.logical_or(editmask_buffer, res[2])
+                    
+                    if completed == len(self.samples):
+                        # finished computation, write final results
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
+
+                    for v, row in enumerate(res[3]):
+                        self.times[res[0][v],:] = row
+
                 else:
                     # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of 256 vectors in the main process
                     # vector_res is in the shape of database_idx, vector
@@ -331,8 +354,26 @@ class Feature_Generator():
             for res in tqdm.tqdm(pool.imap_unordered(self.compute_feature, samples, chunksize = chunksize), total = num_samples):
                 if graph_mode:
                     # res is in the shape of database_idx: array of database indices edited, result: vectors for the given indices, editmask_res: editmask result of the whole graph
-                    # We do not buffer in this case.
-                    self.edit_database_result_by_indices(database_idx = res[0], vectors = res[1], editmask = res[2])
+
+                    num_vec = res[0].shape[0]
+                    # Test whether remaining buffer space is sufficient, otherwise write the buffer and start it again
+                    if (vector_buffer_count + num_vec) >= vector_buffer_size:
+                        # space insufficient
+
+                        # write current buffer
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
+                        vector_buffer_count = 0
+                    
+                    # Write result in the buffer
+                    index_buffer[vector_buffer_count:vector_buffer_count + num_vec] = res[0]
+                    vector_buffer[vector_buffer_count:vector_buffer_count + num_vec,:] = res[1]
+                    vector_buffer_count += num_vec
+                    completed += num_vec
+                    editmask_buffer[:] = np.logical_or(editmask_buffer, res[2])
+                    
+                    if completed == len(self.samples):
+                        # finished computation, write final results
+                        self.edit_database_result_by_indices(database_idx = index_buffer, vectors = vector_buffer, editmask = editmask_buffer, count = vector_buffer_count)
                 else:
                     # Since the writing of intermediary results is by far the most time intensive task, we try to write batches of vector_buffer_size vectors in the main process
                     # vector_res is in the shape of database_idx, vector
@@ -420,15 +461,15 @@ class Feature_Generator():
         # All the unique colors generated values are stored in unique_vals
         for v, color_freq in color_freq_buffer.items():
             res = np.full(shape = (1, len(unique_vals) + 2), fill_value = -1, dtype = np.int64)
-            res[0] = v[1][0]
-            res[1] = v[1][1]
+            res[0, 0] = v[1][0]
+            res[0, 1] = v[1][1]
             for color_idx, color in enumerate(unique_vals):
                 if color in color_freq:
-                    res[color_idx + 2] = color_freq[color]
+                    res[0, color_idx + 2] = color_freq[color]
                 else:
-                    res[color_idx + 2] = 0
+                    res[0, color_idx + 2] = 0
             
-            result_database[v[0],:] = res[:]
+            result_database[v[0],:] = res[0,:]
 
         computation_time = time.time() - start_time
 
@@ -527,7 +568,7 @@ class Feature_Generator():
             time_dump_filename = "times_dump.json"
 
         dump = {}
-        for idx in self.samples:
+        for idx in range(self.shared_dataset_result_shape[0]):
             dump[idx] = {}
             for event in TimeLoggingEvent:
                 if self.times[idx, event.value] >= 0:

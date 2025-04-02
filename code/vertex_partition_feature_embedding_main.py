@@ -8,6 +8,8 @@ import time
 import json #to implement saving and loading the properties of datasets without having to run the computation multiple times
 import tqdm
 from enum import Enum
+import pickle
+import zipfile
 
 #parallelization
 import multiprocessing
@@ -18,7 +20,7 @@ import torch
 from torch import Tensor
 
 from torch_geometric.datasets import TUDataset
-from torch_geometric.data import Data, Dataset
+from torch_geometric.data import Data, Dataset, download_url
 from torch_geometric.data.data import DataEdgeAttr, DataTensorAttr
 from torch_geometric.data.storage import GlobalStorage
 import torch_geometric.utils
@@ -34,7 +36,10 @@ import developmentHelpers as helpers
 import SP_features as spf
 from k_disk_sp_feature_generator import K_Disk_SP_Feature_Generator
 from r_s_ring_sp_feature_generator import R_S_Ring_SP_Feature_Generator
-from vertex_sp_feature_generator import Vertex_sp_feature_generator
+from vertex_sp_feature_generator import Vertex_SP_Feature_Generator
+from CSL_dataset import CSL_Dataset
+from Proximity_dataset import ProximityDataset
+import constants
 
 # OGB
 import ogb.nodeproppred as ogb_node
@@ -162,7 +167,7 @@ def run_molhiv():
 
     # sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_molhiv, r = r, s = s, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
     # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
-    sp_gen = Vertex_sp_feature_generator(dataset = dataset_molhiv, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_vertex, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
+    sp_gen = Vertex_SP_Feature_Generator(dataset = dataset_molhiv, node_pred = False, samples = None, dataset_write_path = molhiv_path, dataset_write_filename = dataset_write_filename_vertex, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = molhiv_properties_path, write_properties_root_path = molhiv_path, write_properties_filename = filename)
 
     # Debugging purposes
     # graph_id, vertex_id = sp_gen.get_vertex_identifier_from_dataset_idx(83879)
@@ -195,6 +200,114 @@ def run_molhiv():
 def run_exp():
     raise NotImplementedError
 
+def run_csl():
+
+    path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir, 'data', 'CSL')
+    csl_path = osp.join(path, 'CSL_dataset')
+    result_mmap_path = 'results.np'
+    editmask_mmap_path = 'editmask.np'
+    dataset_csl = CSL_Dataset(root = csl_path)
+
+    filename = "properties.json"
+    csl_properties_path = None # osp.join(csl_path, filename)
+    k = 6
+
+    # split_idx = dataset_csl.get_idx_split()
+    
+    k = 6
+    r = 3
+    s = 6
+    dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_CSL.svmlight"
+    dataset_write_filename_k_disk = f"{k}_disk_SP_features_CSL.svmlight"
+    dataset_write_filename_vertex = f"Vertex_SP_features_CSL.svmlight"
+
+    # sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_csl, r = r, s = s, node_pred = False, samples = None, dataset_write_path = csl_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = csl_properties_path, write_properties_root_path = csl_path, write_properties_filename = filename)
+    # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_csl, k = k, node_pred = False, samples = None, dataset_write_path = csl_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = csl_properties_path, write_properties_root_path = csl_path, write_properties_filename = filename)
+    sp_gen = Vertex_SP_Feature_Generator(dataset = dataset_csl, node_pred = False, samples = None, dataset_write_path = csl_path, dataset_write_filename = dataset_write_filename_vertex, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = csl_properties_path, write_properties_root_path = csl_path, write_properties_filename = filename)
+
+    # True only for the Vertex SP Features
+    graph_mode = True
+
+    # NOTE: since the dataset only holds 150 graphs, the chunksize has to be sufficiently small
+
+    print('Multi process performance: ')
+    ts_multi = time.time_ns()
+    sp_gen.generate_features(num_processes = 1, chunksize = 32, vector_buffer_size = 16_384, comment = None, log_times = False, dump_times = False, time_summary_path = csl_path, graph_mode = graph_mode)
+    time_multi = (time.time_ns() - ts_multi) / 1_000_000
+    print('Multi threaded time: ' + str(time_multi))
+
+
+# Needs to be executed to download the proximity datasets. This is done here since multiple proximity datasets are bundled.
+def download_proximity(root: str):
+
+    # Downloads and unzips the dataset
+    datasets_url = 'https://zenodo.org/records/6557736/files/Proximity.zip?download=1'
+    filename = 'Proximity.zip'
+    download_url(datasets_url, root)
+
+    with zipfile.ZipFile(osp.join(root, filename), 'r') as zip_ref:
+        zip_ref.extractall(root)
+
+    # Downloads the data splits
+    prox_split_urls = {1: 'https://github.com/radoslav11/SP-MPNN/raw/refs/heads/main/data_splits/Prox/1-Prox_splits.json',
+                       3: 'https://github.com/radoslav11/SP-MPNN/raw/refs/heads/main/data_splits/Prox/3-Prox_splits.json',
+                       5: 'https://github.com/radoslav11/SP-MPNN/raw/refs/heads/main/data_splits/Prox/5-Prox_splits.json',
+                       8: 'https://github.com/radoslav11/SP-MPNN/raw/refs/heads/main/data_splits/Prox/8-Prox_splits.json',
+                       10: 'https://github.com/radoslav11/SP-MPNN/raw/refs/heads/main/data_splits/Prox/10-Prox_splits.json'
+    }
+
+    for h, url in prox_split_urls.items():
+        download_url(url = url, folder = osp.join(root, f"{h}-Prox"))
+
+
+def run_proximity():
+
+    h = 1
+
+    path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir, 'data', 'Proximity')
+    # download_proximity(root = path)
+    prox_path = osp.join(path, f"{h}-Prox")
+
+    result_mmap_path = 'results.np'
+    editmask_mmap_path = 'editmask.np'
+    dataset_prox = ProximityDataset(root = prox_path, h = h)
+
+    filename = "properties.json"
+    prox_properties_path = None # osp.join(prox_path, filename)
+
+    # split_idx = dataset_csl.get_idx_split()
+    
+    k = 3
+    r = 3
+    s = 6
+    dataset_write_filename_r_s_ring = f"{r}_{s}_ring_SP_features_{h}-Prox.svmlight"
+    dataset_write_filename_k_disk = f"{k}_disk_SP_features_{h}-Prox.svmlight"
+    dataset_write_filename_vertex = f"Vertex_SP_features_{h}-Prox.svmlight"
+
+    rng = np.random.default_rng(seed = constants.SEED)
+    ran_samples = rng.integers(low = 0, high = 9015, size = 50)
+
+    # sp_gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_prox, r = r, s = s, node_pred = False, samples = None, dataset_write_path = prox_path, dataset_write_filename = dataset_write_filename_r_s_ring, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = prox_properties_path, write_properties_root_path = prox_path, write_properties_filename = filename)
+    # sp_gen = K_Disk_SP_Feature_Generator(dataset = dataset_prox, k = k, node_pred = False, samples = None, dataset_write_path = prox_path, dataset_write_filename = dataset_write_filename_k_disk, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = prox_properties_path, write_properties_root_path = prox_path, write_properties_filename = filename)
+    sp_gen = Vertex_SP_Feature_Generator(dataset = dataset_prox, node_pred = False, samples = None, dataset_write_path = prox_path, dataset_write_filename = dataset_write_filename_vertex, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = prox_properties_path, write_properties_root_path = prox_path, write_properties_filename = filename)
+
+    # True only for the Vertex SP Features
+    graph_mode = True
+
+    log_times = False
+
+    # NOTE: The chunksize needs to be reduced for graph mode, normal: 512(/1024), graph: 64-128. Higher values might cause memory usage of the parent process to spike, low values might cause memroy usage of the parent process to continually rise.
+    # The chunksize can be estimated based on CPU usage for each process: if the parent process is at max usage, the chunksize should probably be higher since to reduce administrative overhead
+    # Additionally, this might lead to constantly increasing memory usage of the parent process since it has to buffer results from the child processes (especially in graph mode). This parameter has a huge impact on performance.
+    # This computation should be done on an SSD, a hard drive might not have sufficient data speeds to support the computation without a significant slow down.
+
+    print('Multi process performance: ')
+    ts_multi = time.time_ns()
+    sp_gen.generate_features(num_processes = 8, chunksize = 64, vector_buffer_size = 16_384, comment = None, log_times = log_times, dump_times = log_times, time_summary_path = prox_path, graph_mode = graph_mode)
+    time_multi = (time.time_ns() - ts_multi) / 1_000_000
+    print('Multi threaded time: ' + str(time_multi))
+
+
 if __name__ == '__main__':
     #path = osp.join(osp.abspath(osp.dirname(__file__)), "data", "SP_features")
     # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
@@ -211,7 +324,7 @@ if __name__ == '__main__':
     torch.serialization.add_safe_globals([DataEdgeAttr, DataTensorAttr, GlobalStorage])
 
     # Testing the OGB data loader compatibility
-    run_molhiv()
+    run_proximity()
 
     # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
     # proteins_path = osp.join(path, "PROTEINS")

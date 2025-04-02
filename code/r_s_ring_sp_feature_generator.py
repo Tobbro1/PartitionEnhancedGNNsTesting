@@ -64,7 +64,7 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
         editmask.flush()
         
         #create graph features object for computation purposes
-        self.sp_features = spf.SP_graph_features(label_alphabet = self.properties["label_alphabet"], distances_alphabet = self.properties["distances_alphabet"], graph_sizes = self.properties["graph_sizes"])
+        self.sp_features = spf.SP_graph_features(label_alphabet = self.properties["label_alphabet"], distances_alphabet = self.properties["distances_alphabet"])
 
     # Start method of a new process
     # Compute the r-s-ring SP feature vector for a single data point

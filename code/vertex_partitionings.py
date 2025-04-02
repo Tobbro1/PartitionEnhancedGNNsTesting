@@ -7,9 +7,10 @@
 #system
 import time
 import os.path as osp
+import os
 
 #general
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 from enum import Enum
 
 #scikit-learn
@@ -29,9 +30,13 @@ import colorsys
 # constants
 import constants
 
+# own functionality
+from clarans import Clarans
+
 class Clustering_Algorithm(Enum):
     k_means = 0
     optics = 1
+    clarans = 2
 
 
 class Vertex_Partition_Clustering():
@@ -82,7 +87,7 @@ class Vertex_Partition_Clustering():
     # This method draws the dataset colored by their assigned cluster according to the label parameter. This makes use of a PCA to two dimensions
     # The grid_granularity parameter is used when visualizing centroid based methods. Note that the grid is made between the smallest and highest values for the PCA transformed vectors which might lead to huge memroy requirements in case of large ranges and small granularity
     # labels is used to visualize optics results
-    def draw_clustering_data(self, num_figure: int, title: str, cluster_alg: Clustering_Algorithm, centroids: np.array = None, grid_granularity = 2, labels: np.array = None) -> None:
+    def draw_clustering_data(self, num_figure: int, title: str, cluster_alg: Clustering_Algorithm, labels: np.array, centroids: Optional[np.array] = None, grid_granularity: Optional[int] = 2, medoids: Optional[np.array] = None) -> None:
 
         if self.draw_lsa is None:
             self.generate_draw_pca()
@@ -92,6 +97,7 @@ class Vertex_Partition_Clustering():
         if cluster_alg == Clustering_Algorithm.k_means:
             # k-means, code taken from https://scikit-learn.org/stable/auto_examples/cluster/plot_kmeans_digits.html#sphx-glr-auto-examples-cluster-plot-kmeans-digits-py
             assert centroids is not None
+            assert grid_granularity is not None
 
             centroids = self.draw_lsa.transform(centroids)
 
@@ -119,6 +125,7 @@ class Vertex_Partition_Clustering():
             plt.ylabel(f"Component 2: {self.draw_lsa.explained_variance_ratio_[1]}")
             plt.xticks(())
             plt.yticks(())
+
         elif cluster_alg == Clustering_Algorithm.optics:
             # OPTICS, code taken from https://scikit-learn.org/stable/auto_examples/cluster/plot_optics.html#sphx-glr-auto-examples-cluster-plot-optics-py
             assert labels is not None
@@ -141,14 +148,48 @@ class Vertex_Partition_Clustering():
             plt.xlim(x_min, x_max)
             plt.ylim(y_min, y_max)
 
-            plt.xlabel(f"X")
-            plt.ylabel(f"Y")
+            plt.xlabel(f"Component 1: {self.draw_lsa.explained_variance_ratio_[0]}")
+            plt.ylabel(f"Component 2: {self.draw_lsa.explained_variance_ratio_[1]}")
 
             for c in range(num_cluster):
                 class_data = reduced_data[labels == c]
                 plt.plot(class_data[:,0], class_data[:,1], color = rgb_tuples[c], alpha = 0.3)
 
             plt.plot(reduced_data[labels == -1,0], reduced_data[labels == -1,1], alpha = 0.1)
+
+        elif cluster_alg == Clustering_Algorithm.clarans:
+            # clarans
+            assert labels is not None
+            assert medoids is not None
+
+            num_cluster = np.unique(labels)
+            medoids = self.draw_lsa.transform(medoids)
+
+            # Generate colors based on the number of clusters found for plotting
+            hsv_tuples = [(x*1.0/num_cluster, 0.5, 0.5) for x in range(num_cluster)]
+            rgb_tuples = map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples)
+
+            # Configure the plot
+            plt.figure(num_figure)
+            plt.clf()
+            plt.title(title)
+
+            x_min, x_max = reduced_data[:, 0].min() - 1, reduced_data[:, 0].max() + 1
+            y_min, y_max = reduced_data[:, 1].min() - 1, reduced_data[:, 1].max() + 1
+
+            plt.xlim(x_min, x_max)
+            plt.ylim(y_min, y_max)
+
+            plt.xlabel(f"Component 1: {self.draw_lsa.explained_variance_ratio_[0]}")
+            plt.ylabel(f"Component 2: {self.draw_lsa.explained_variance_ratio_[1]}")
+
+            for c in range(num_cluster):
+                class_data = reduced_data[labels == c]
+                plt.plot(class_data[:,0], class_data[:,1], color = rgb_tuples[c], alpha = 0.3)
+
+            # Plot the medoids as a white X
+            plt.scatter(medoids[:, 0], medoids[:, 1], marker="x", s=169, linewidths=3, color="w", zorder=10,)
+
 
 
     # Returns a tuple of assignments, centroids, inertia and execution time of the clustering
@@ -199,6 +240,17 @@ class Vertex_Partition_Clustering():
         execution_time = time.time() - t0
 
         return labels, execution_time
+    
+    # Returns a tuple of labels (shape = (num_samples,)), medoids (shape = (num_clusters, num_features)), inertia of the computed labels and execution time
+    def clarans(self, num_local: int, max_neighbor: int, num_clusters: int) -> Tuple[np.array, np.array, float, float]:
+        cns = Clarans(num_local = num_local, max_neighbor = max_neighbor, num_clusters = num_clusters)
+
+        t0 = time.time()
+        cns.fit(self.dataset.toarray())
+        labels = cns.cluster_labels
+        execution_time = time.time() - t0
+
+        return labels, cns.data[cns.medoids,:], cns.inertia, execution_time
 
     # Reads an svmlight file
     def load_dataset_from_svmlight(self, path: str, dtype: np.dtype) -> None:
@@ -252,7 +304,7 @@ class Vertex_Partition_Clustering():
 def cluster_molhiv(cluster_algs: List[Clustering_Algorithm], draw_res: bool, write_res: bool) -> None:
     clusterer = Vertex_Partition_Clustering()
 
-    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'OGB')
+    path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir, 'data', 'OGB')
     molhiv_path = osp.join(path, 'MOL_HIV')
 
     molhiv_vertex_sp_features_filename = "Vertex_SP_features_MOLHIV.svmlight"
@@ -287,8 +339,8 @@ def cluster_molhiv(cluster_algs: List[Clustering_Algorithm], draw_res: bool, wri
     
     if Clustering_Algorithm.optics in cluster_algs:
         min_samples = 5
-        max_eps = np.inf
-        n_jobs = None
+        max_eps = 10
+        n_jobs = -2
 
         cluster_labels_title = f'Vertex_SP_features_optics'
         cluster_labels_filename = f'{cluster_labels_title}_labels.txt'
@@ -305,6 +357,27 @@ def cluster_molhiv(cluster_algs: List[Clustering_Algorithm], draw_res: bool, wri
             clusterer.write_clustering_labels(labels = labels_array, path = clusterlabels_path, comment = cluster_labels_title)
 
         print(f"{cluster_labels_title}:\nClustering time: {clustering_time}")
+
+    if Clustering_Algorithm.clarans in cluster_algs:
+        cns_n_clusters = 6
+        cns_max_neighbor = 10
+        cns_num_local = 10
+
+        cluster_labels_title = f'Vertex_SP_features_clarans'
+        cluster_labels_filename = f'{cluster_labels_title}_labels.txt'
+        clusterlabels_path = osp.join(molhiv_path, cluster_labels_filename)
+
+        labels, medoids, inertia, clustering_time = clusterer.clarans(num_local = cns_num_local, max_neighbor = cns_max_neighbor, num_clusters = cns_n_clusters)
+
+        if draw_res:
+            clusterer.draw_clustering_data(num_figure = num_figure, title = cluster_labels_filename, cluster_alg = Clustering_Algorithm.clarans, labels = labels, medoids = medoids)
+            num_figure += 1
+
+        if write_res:
+            labels_array = clusterer.generate_clustering_result_array(labels = labels)
+            clusterer.write_clustering_labels(labels = labels_array, path = clusterlabels_path, comment = cluster_labels_title)
+
+        print(f"{cluster_labels_title}:\nInertia: {inertia}, clustering time: {clustering_time}")
 
     plt.show()
 

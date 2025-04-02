@@ -161,15 +161,15 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-#ignore data folder
+# ignore data folder
 data/
-#ignore note txt file
+# ignore note txt file
 general_implementation_notes.txt
 dataset_notes.txt
 runtime_notes.txt
-#ignore some other files
+# ignore some other files
 Lovacs_GraKeL.py
 testscript.py
 2WL_features_backup.py
-#ignore memmap files
+# ignore memmap files
 *.np

@@ -30,12 +30,7 @@ class SP_graph_features():
     #NOTE: this implementation is intended for undirected graphs and will not work with directed graphs. Thus it is assumed that the distances matrix is symmetric. 
     def sp_feature_map(self, distances: np.array, x: Tensor) -> Dict[Tuple[Tuple[int, int], int], int]:
 
-        #if the features are not labels they are assumed to be a one-hot encoding
-        if x.size(1) > 1:
-            assert (x.sum(dim=1) == 1).sum() == x.size(0)
-            x = x.argmax(dim=1)  # one-hot -> integer.
         assert x.dtype == torch.long
-
         assert distances.shape == (x.size(0), x.size(0))
 
         _tupledict = {}
@@ -96,10 +91,6 @@ class SP_vertex_features():
     #NOTE: this implementation is intended for undirected graphs and will not work with directed graphs. Thus it is assumed that the distances matrix is symmetric. 
     def vertex_sp_feature_map(self, distances: np.array, x: Tensor, vertex_id: int) -> Dict[Tuple[int, int], int]:
 
-        #if the features are not labels they are assumed to be a one-hot encoding
-        if x.size(1) > 1:
-            assert (x.sum(dim=1) == 1).sum() == x.size(0)
-            x = x.argmax(dim=1)  # one-hot -> integer.
         assert x.dtype == torch.long
         assert distances.shape == (x.size(0), x.size(0))
 
