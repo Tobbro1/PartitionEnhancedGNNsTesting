@@ -4,26 +4,33 @@
 #Cluster these feature vectors using different clustering techniques (k-means, OPTICS)
 #Include functionality to write the clustering results into a file (a dictionary (graph_id, vertex_id) -> cluster_id ?)
 
-#system
+# system
 import time
 import os.path as osp
 import os
+import pickle
+import json
 
-#general
+# general
 from typing import Dict, Tuple, List, Optional
 from enum import Enum
 
-#scikit-learn
+# pytorch
+import torch
+from torch import Tensor
+
+# scikit-learn
 import sklearn
 from sklearn.datasets import load_svmlight_file
 from sklearn.cluster import MiniBatchKMeans, OPTICS
 from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.decomposition import TruncatedSVD
+import sklearn.preprocessing as prepocessing
 
-#numpy
+# numpy
 import numpy as np 
 
-#plotting
+# plotting
 import matplotlib.pyplot as plt
 import colorsys
 
@@ -41,8 +48,10 @@ class Clustering_Algorithm(Enum):
 
 class Vertex_Partition_Clustering():
 
-    def __init__(self):
+    def __init__(self, absolute_path_prefix: str):
         super().__init__()
+
+        self.absolute_path_prefix = absolute_path_prefix
 
         self.dataset = None
         self.transformed_dataset = None
@@ -54,15 +63,228 @@ class Vertex_Partition_Clustering():
         self.lsa = None
         self.draw_lsa = None
 
-    # Returns a tuple of the learned components and the ratio of their explained variance
-    def generate_lsa(self, target_dimensions) -> Tuple[np.ndarray, np.ndarray]:
+        # Metadata collected while clustering
+        # dataset_prop: path, desc, normalized
+        # clustering_alg: desc: short description of the clustering algorithm used
+        #                 identifier: id of the clustering algorithm (from the enum)
+        #                 metric: short string
+        # datasplit_prop: desc, split_mode (CV/fixed), num_samples, split_idx (if CV)
+        # lsa: lsa_used,
+        #      path (of pickle file) (if used)
+        #      result_prop: explained_variances (for each component, var and var_ratio), num_features_seen, time
+        #      config (if used): num_components, algorithm (as str; arpack or randomized), num_iter (if random), num_oversamples (if random), 
+        #                        power_iteration_normalizer (if randomized), random_seed (if random), tol (if arpack)
+        # result_prop: desc (short string describing the result), path
+        #              size of result (in bytes): as array, on disk
+        #              if k_means: num_centroids, num_dim, inertia, num_iter, num_steps, num_features_seen
+        # times: read_dataset_time, clustering_time
+        # config: if k_means: num_clusters, init (method as string), max_iter, batch_size, random_seed, max_no_improvement, num_inits, init_size, reassignment_ratio
+        self.metadata = {}
+        self.metadata["path_prefix"] = self.absolute_path_prefix
+        self.metadata["dataset_prop"] = {}
+        self.metadata["dataset_prop"]["desc"] = ""
+        self.metadata["dataset_prop"]["normalized"] = ""
+        self.metadata["dataset_prop"]["path"] = ""
+        self.metadata["clustering_alg"] = {}
+        self.metadata["clustering_alg"]["desc"] = ""
+        self.metadata["clustering_alg"]["metric"] = ""
+        self.metadata["clustering_alg"]["id"] = -1
+        self.metadata["data_split"] = {}
+        self.metadata["data_split"]["desc"] = ""
+        self.metadata["data_split"]["split_mode"] = ""
+        self.metadata["data_split"]["num_samples"] = ""
+        # self.metadata["data_split"]["split_idx"] = -1
+        self.metadata["lsa"] = {}
+        self.metadata["lsa"]["lsa_used"] = False
+        # if lsa_used
+        # self.metadata["lsa"]["path"] = ""
+        # self.metadata["lsa"]["result_prop"] = {}
+        # self.metadata["lsa"]["result_prop"]["num_features_seen"] = -1
+        # self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
+        # # foreach component: { variance, var_ratio } 
+        # self.metadata["lsa"]["config"] = {}
+        # self.metadata["lsa"]["config"]["algorithm"] = ""
+        # self.metadata["lsa"]["config"]["num_components"] = -1
+        # # if randomized:
+        # # self.metadata["lsa"]["config"]["num_iter"] = -1
+        # # self.metadata["lsa"]["config"]["num_oversamples"] = -1
+        # # self.metadata["lsa"]["config"]["power_iteration_normalizer"] = ""
+        # # if arpack:
+        # # self.metadata["lsa"]["config"]["tol"] = -1.0
+        self.metadata["result_prop"] = {}
+        self.metadata["result_prop"]["desc"] = ""
+        self.metadata["result_prop"]["path"] = ""
+        self.metadata["result_prop"]["size"] = {}
+        self.metadata["result_prop"]["size"]["array"] = -1
+        self.metadata["result_prop"]["size"]["disk"] = -1
+        # if k_means
+        # self.metadata["result_prop"]["num_centroids"] = -1
+        # self.metadata["result_prop"]["num_dim"] = -1
+        # self.metadata["result_prop"]["inertia"] = 0.0
+        # self.metadata["result_prop"]["num_iter"] = -1
+        # self.metadata["result_prop"]["num_steps"] = -1
+        # self.metadata["result_prop"]["num_features_seen"] = -1
+        self.metadata["times"] = {}
+        self.metadata["times"]["read_from_disk"] = -1.0
+        self.metadata["times"]["write_on_disk"] = -1.0
+        # self.metadata["times"]["lsa_comp"] = -1.0 # if lsa
+        self.metadata["times"]["clustering"] = -1.0
+        self.metadata["config"] = {}
+        # # if k_means
+        # self.metadata["config"]["num_clusters"] = -1
+        # self.metadata["config"]["init_method"] = ""
+        # self.metadata["config"]["max_iter"] = -1
+        # self.metadata["config"]["batch_size"] = -1
+        # self.metadata["config"]["max_no_improvement"] = -1
+        # self.metadata["config"]["num_inits"] = -1
+        # self.metadata["config"]["num_init_random_samples"] = -1
+        # self.metadata["config"]["reassignment_ratio"] = -1.0
+        # self.metadata["config"]["tol"] = -1.0
 
-        # n_components is the number of principal components that are utilised, thus the number of dimensions after the PCA
-        # if copy is set to False, the data passed to train the PCA gets overwritten
-        # whiten can sometimes improve downstream accuracy of estimators but removes some information from the transformed signal as it normalizes component wise variances
-        # svd solver selects the method to solve the underlying singular value decomposition (see PCA documentation for values)
-        self.lsa = TruncatedSVD(n_components = target_dimensions, algorithm = 'arpack')
+
+    def reset_parameters_and_metadata(self) -> None:
+        self.dataset = None
+        self.transformed_dataset = None
+        self.vertex_identifier = None
+
+        self.num_vertices = -1
+        self.num_features = -1
+
+        self.lsa = None
+        self.draw_lsa = None
+
+        # Metadata collected while clustering
+        # dataset_prop: path, desc, normalized
+        # clustering_alg: desc: short description of the clustering algorithm used
+        #                 identifier: id of the clustering algorithm (from the enum)
+        #                 metric: short string
+        # datasplit_prop: desc, split_mode (CV/fixed), num_samples, split_idx (if CV)
+        # lsa: lsa_used,
+        #      path (of pickle file) (if used)
+        #      result_prop: explained_variances (for each component, var and var_ratio), num_features_seen, time
+        #      config (if used): num_components, algorithm (as str; arpack or randomized), num_iter (if random), num_oversamples (if random), 
+        #                        power_iteration_normalizer (if randomized), random_seed (if random), tol (if arpack)
+        # result_prop: desc (short string describing the result), path
+        #              size of result (in bytes): as array, on disk
+        #              if k_means: num_centroids, num_dim, inertia, num_iter, num_steps, num_features_seen
+        # times: read_dataset_time, clustering_time
+        # config: if k_means: num_clusters, init (method as string), max_iter, batch_size, random_seed, max_no_improvement, num_inits, init_size, reassignment_ratio
+        self.metadata = {}
+        self.metadata["dataset_prop"] = {}
+        self.metadata["dataset_prop"]["desc"] = ""
+        self.metadata["dataset_prop"]["normalized"] = ""
+        self.metadata["dataset_prop"]["path"] = ""
+        self.metadata["clustering_alg"] = {}
+        self.metadata["clustering_alg"]["desc"] = ""
+        self.metadata["clustering_alg"]["metric"] = ""
+        self.metadata["clustering_alg"]["id"] = -1
+        self.metadata["data_split"] = {}
+        self.metadata["data_split"]["desc"] = ""
+        self.metadata["data_split"]["split_mode"] = ""
+        self.metadata["data_split"]["num_samples"] = ""
+        # self.metadata["data_split"]["split_idx"] = -1
+        self.metadata["lsa"] = {}
+        self.metadata["lsa"]["lsa_used"] = False
+        # if lsa_used
+        # self.metadata["lsa"]["path"] = ""
+        # self.metadata["lsa"]["result_prop"] = {}
+        # self.metadata["lsa"]["result_prop"]["num_features_seen"] = -1
+        # self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
+        # # foreach component: { variance, var_ratio } 
+        # self.metadata["lsa"]["config"] = {}
+        # self.metadata["lsa"]["config"]["algorithm"] = ""
+        # self.metadata["lsa"]["config"]["num_components"] = -1
+        # # if randomized:
+        # # self.metadata["lsa"]["config"]["num_iter"] = -1
+        # # self.metadata["lsa"]["config"]["num_oversamples"] = -1
+        # # self.metadata["lsa"]["config"]["power_iteration_normalizer"] = ""
+        # # if arpack:
+        # # self.metadata["lsa"]["config"]["tol"] = -1.0
+        self.metadata["result_prop"] = {}
+        self.metadata["result_prop"]["desc"] = ""
+        self.metadata["result_prop"]["path"] = ""
+        self.metadata["result_prop"]["size"] = {}
+        self.metadata["result_prop"]["size"]["array"] = -1
+        self.metadata["result_prop"]["size"]["disk"] = -1
+        # if k_means
+        # self.metadata["result_prop"]["num_centroids"] = -1
+        # self.metadata["result_prop"]["num_dim"] = -1
+        # self.metadata["result_prop"]["inertia"] = 0.0
+        # self.metadata["result_prop"]["num_iter"] = -1
+        # self.metadata["result_prop"]["num_steps"] = -1
+        # self.metadata["result_prop"]["num_features_seen"] = -1
+        self.metadata["times"] = {}
+        self.metadata["times"]["read_from_disk"] = -1.0
+        self.metadata["times"]["write_on_disk"] = -1.0
+        # self.metadata["times"]["lsa_comp"] = -1.0 # if lsa
+        # self.metadata["times"]["lsa_application"] = -1.0
+        self.metadata["times"]["clustering"] = -1.0
+        self.metadata["config"] = {}
+        # # if k_means
+        # self.metadata["config"]["num_clusters"] = -1
+        # self.metadata["config"]["init_method"] = ""
+        # self.metadata["config"]["max_iter"] = -1
+        # self.metadata["config"]["batch_size"] = -1
+        # self.metadata["config"]["max_no_improvement"] = -1
+        # self.metadata["config"]["num_inits"] = -1
+        # self.metadata["config"]["num_init_random_samples"] = -1
+        # self.metadata["config"]["reassignment_ratio"] = -1.0
+        # self.metadata["config"]["tol"] = -1.0
+
+    # Returns a tuple of the learned components and the ratio of their explained variance
+    def generate_lsa(self, target_dimensions: int, write_lsa_path: Optional[str] = None, write_lsa_filename: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+
+        t0 = time.time()
+
+        # log metadata for lsa
+        if write_lsa_filename is not None:
+            self.metadata["lsa"]["path"] = ""
+
+        algorithm = 'arpack'
+        tol = 0.0
+        n_iter = 5 # The number of iterations of the randomized SVD solver; default: 5
+        n_oversamples = 10 # The number of oversamples for randomized SVD solver; default: 10
+        power_iteration_normalizer = 'auto' # Power iteration normalizer for randomized SVD solver; default: 'auto'
+
+        self.metadata["lsa"]["result_prop"] = {}
+        self.metadata["lsa"]["config"] = {}
+        self.metadata["lsa"]["config"]["algorithm"] = algorithm
+        self.metadata["lsa"]["config"]["num_components"] = target_dimensions
+
+        if algorithm == 'randomized':
+            self.metadata["lsa"]["config"]["num_iter"] = n_iter
+            self.metadata["lsa"]["config"]["num_oversamples"] = n_oversamples
+            self.metadata["lsa"]["config"]["power_iteration_normalizer"] = power_iteration_normalizer
+        elif algorithm == 'arpack':
+            self.metadata["lsa"]["config"]["tol"] = tol
+
+        # n_components is the number of principal components that are utilised, thus the number of dimensions after the LSA
+        self.lsa = TruncatedSVD(n_components = target_dimensions, algorithm = algorithm, n_iter = n_iter, n_oversamples = n_oversamples, power_iteration_normalizer = power_iteration_normalizer, tol = tol)
         self.lsa.fit(self.dataset)
+
+        self.metadata["lsa"]["result_prop"]["num_features_seen"] = self.lsa.n_features_in_
+        self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
+        for idx in range(self.lsa.explained_variance_.shape[0]):
+            self.metadata["lsa"]["result_prop"]["explained_variances"][idx] = { "var" : self.lsa.explained_variance_[idx], "var_ratio" : self.lsa.explained_variance_ratio_[idx] }
+
+        if write_lsa_path is not None:
+            # Store the lsa object for potential later use
+            assert write_lsa_filename is not None
+
+            path = osp.join(self.absolute_path_prefix, write_lsa_path)
+            if not osp.exists(path):
+                os.makedirs(path)
+
+            path = osp.join(path, write_lsa_filename)
+            if not osp.exists(path):
+                open(path, 'wb').close()
+
+            with open(path, 'wb') as file:
+                pickle.dump(obj = self.lsa, file = file)
+
+            self.metadata["lsa"]["path"] = osp.join(write_lsa_path, write_lsa_filename)
+
+        self.metadata["times"]["lsa_comp"] = time.time() - t0
 
         return self.lsa.components_, self.lsa.explained_variance_ratio_
 
@@ -72,8 +294,14 @@ class Vertex_Partition_Clustering():
         
         if self.lsa is None:
             raise ValueError("Initialize LSA before applying")
+        
+        t0 = time.time()
+        
+        self.metadata["lsa"]["lsa_used"] = True
 
         self.dataset = self.lsa.transform(self.dataset)
+
+        self.metadata["times"]["lsa_application"] = time.time() - t0
 
     # A PCA to two dimensions used for visualization
     # Returns a tuple of the learned components and the ratio of their explained variance
@@ -190,26 +418,61 @@ class Vertex_Partition_Clustering():
             # Plot the medoids as a white X
             plt.scatter(medoids[:, 0], medoids[:, 1], marker="x", s=169, linewidths=3, color="w", zorder=10,)
 
-
-
     # Returns a tuple of assignments, centroids, inertia and execution time of the clustering
     def mini_batch_k_means(self, n_clusters: int, batch_size: int, n_init: int, max_no_improvement: int, max_iter: int) -> Tuple[np.ndarray, np.ndarray, float, float]:
 
+        t0 = time.time()
+
+        self.metadata["clustering_alg"]["desc"] = "mini-batch k-means"
+        self.metadata["clustering_alg"]["metric"] = "euclidean"
+        self.metadata["clustering_alg"]["id"] = Clustering_Algorithm.k_means.value
+
         # batch-size greater than 256 * num_cores for paralllelism on all cores
-        # Note that the random_state value is not set, thus inherited from the global numpy random_state value
         # n_init describes the number of random initializations tried, before using the best (in terms of inertia) initialization (note that the algorithm is not run for every initialization but only for the best)
         # init_size is the number of samples used for initialization (we use the default value which should be set to 3 * n_clusters)
         # max_no_improvements denotes the maximum number of no improvement on inertia for the algorithm to terminate early
-        mbk = MiniBatchKMeans(init = 'k-means++', n_clusters = n_clusters, batch_size = batch_size, n_init = n_init, max_no_improvement = max_no_improvement, max_iter = max_iter)
+        desc = f'{n_clusters}-means'
+        init_method = 'k-means++'
+        init_size = 3 * batch_size
+        if init_size < n_clusters:
+            init_size = 3 * n_clusters
+        reassignment_ratio = 0.1
+        tol = 0.0
 
-        t0 = time.time()
+        self.metadata["result_prop"]["desc"] = desc
+        self.metadata["config"]["num_clusters"] = n_clusters
+        self.metadata["config"]["init_method"] = init_method
+        self.metadata["config"]["max_iter"] = max_iter
+        self.metadata["config"]["batch_size"] = batch_size
+        self.metadata["config"]["max_no_improvement"] = max_no_improvement
+        self.metadata["config"]["num_inits"] = n_init
+        self.metadata["config"]["init_size"] = init_size
+        self.metadata["config"]["reassignment_ratio"] = reassignment_ratio
+        self.metadata["config"]["tol"] = tol
+        
+        mbk = MiniBatchKMeans(n_clusters = n_clusters, init = init_method, max_iter = max_iter, batch_size = batch_size, tol = tol, max_no_improvement = max_no_improvement, init_size = init_size, n_init = n_init, reassignment_ratio = reassignment_ratio)
 
         mbk.fit(self.dataset)
         labels = pairwise_distances_argmin(self.dataset, mbk.cluster_centers_)
 
+        num_centroids, num_dim = mbk.cluster_centers_.shape
+        inertia = mbk.inertia_
+        num_iter = mbk.n_iter_
+        num_steps = mbk.n_steps_
+        num_features_seen = mbk.n_features_in_
+
+        self.metadata["result_prop"]["num_centroids"] = num_centroids
+        self.metadata["result_prop"]["num_dim"] = num_dim
+        self.metadata["result_prop"]["inertia"] = inertia
+        self.metadata["result_prop"]["num_iter"] = num_iter
+        self.metadata["result_prop"]["num_steps"] = num_steps
+        self.metadata["result_prop"]["num_features_seen"] = num_features_seen
+
         execution_time = time.time() - t0
+
+        self.metadata["times"]["clustering"] = execution_time
         
-        return labels, mbk.cluster_centers_, mbk.inertia_, execution_time
+        return labels, mbk.cluster_centers_, inertia, execution_time
 
     # Returns a tuple of assignments and execution time of the clustering
     def optics(self, min_samples: int, max_eps: float = np.inf, n_jobs: int = None) -> Tuple[np.array, float]:
@@ -253,17 +516,42 @@ class Vertex_Partition_Clustering():
         return labels, cns.data[cns.medoids,:], cns.inertia, execution_time
 
     # Reads an svmlight file
-    def load_dataset_from_svmlight(self, path: str, dtype: np.dtype) -> None:
+    # split_prop is expected to be
+    # ["desc"]
+    # ["split_mode"]
+    # ["num_samples"]
+    # ["split_idx"] if split_mode is 'CV'
+    def load_dataset_from_svmlight(self, path: str, dtype: np.dtype, normalize: bool = False, split: Optional[Tensor] | Optional[np.array] | Optional[List[int]] = None, dataset_desc: Optional[str] = None, split_prop: Dict[str, str | int] = None) -> None:
 
-        if not osp.exists(path):
+        t0 = time.time()
+
+        data_path = osp.join(self.absolute_path_prefix, path)
+        if not osp.exists(data_path):
             raise FileNotFoundError
 
-        # We can discard the target labels since clustering is unsupervised
-        data, _ = load_svmlight_file(f = path, dtype = dtype, zero_based = True)
+        if dataset_desc is None:
+            dataset_desc = ""
 
-        self.dataset = data[:,2:]
-        self.vertex_identifier = data[:,0:2]
+        self.metadata["dataset_prop"]["desc"] = dataset_desc
+        self.metadata["dataset_prop"]["normalized"] = normalize
+        self.metadata["dataset_prop"]["path"] = path
+
+        # We can discard the target labels since clustering is unsupervised
+        data, _ = load_svmlight_file(f = data_path, dtype = dtype, zero_based = True)
+
+        if split is None:
+            split = np.array(list(range(data.shape[0])))
+
+        self.metadata["data_split"] = split_prop
+
+        if normalize:
+            self.dataset = prepocessing.normalize(data[split,2:], axis = 0)
+        else:
+            self.dataset = data[split,2:]
+        self.vertex_identifier = data[split,0:2]
         self.num_vertices, self.num_features = self.dataset.shape
+
+        self.metadata["times"]["read_from_disk"] = time.time() - t0
 
     # Equivalent to executing generate_clustering_result_array_from_dict with the result of generate_clustering_result_dict but without the intermediary step
     def generate_clustering_result_array(self, labels) -> np.array:
@@ -294,10 +582,51 @@ class Vertex_Partition_Clustering():
             res[idx, :] = np.array([_t[0], _t[1], dict[_t]])
 
         return res
+
+    # Returns metadata dictionary
+    def write_centroids_or_medoids(self, points: np.array, path: str, filename: str, comment: Optional[str] = None):
+
+        t0 = time.time()
+
+        if comment is None:
+            comment = ""
+
+        data_path = osp.join(self.absolute_path_prefix, path)
+        if not osp.exists(data_path):
+            os.makedirs(data_path)
+
+        data_path = osp.join(data_path, filename)
+        if not osp.exists(data_path):
+            open(data_path, 'w').close()
+
+        self.metadata["result_prop"]["path"] = osp.join(path, filename)
+        self.metadata["result_prop"]["size"]["array"] = points.nbytes
+
+        with open(data_path, "w") as file:
+            np.savetxt(fname = file, X = points, comments = '#', fmt = '%d', header = comment)
+
+        self.metadata["result_prop"]["size"]["disk"] = os.stat(path = data_path).st_size
+
+        self.metadata["times"]["write_on_disk"] = time.time() - t0
+
+        return self.metadata
     
+    def write_metadata(self, path: str, filename: str):
+        path = osp.join(self.absolute_path_prefix, path)
+        if not osp.exists(path):
+            os.makedirs(path)
+
+        path = osp.join(path, filename)
+        if not osp.exists(path):
+            open(path, 'w').close()
+
+        with open(path, "w") as file:
+            file.write(json.dumps(self.metadata, indent=4))
+
     # Write array of given labels into a file for storage (this is done in a human-readable/non-binary way for convenience)
     # NOTE: labels has to be a 1D or 2D array
     def write_clustering_labels(self, labels: np.array, path: str, comment: str) -> None:
+        path = osp.join(self.absolute_path_prefix, path)
         np.savetxt(fname = path, X = labels, comments = '#', fmt = '%d', header = comment)
 
 #Test zone

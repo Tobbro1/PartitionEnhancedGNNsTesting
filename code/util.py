@@ -1,5 +1,7 @@
 #general imports
 from typing import List, Optional, Tuple, Union
+import json
+import os.path as osp
 
 #pytorch, pytorch geometric
 import torch
@@ -112,3 +114,12 @@ def gen_r_s_ring(r: int, s: int, graph_data: Data, vertex: int) -> Data:
     # NOTE: It is necessary to specify num_nodes in case of graphs containing isolated vertices (as the correct number of vertices cannot be inferenced from edge_index in this case)
     _subset, _edge_index, _, _ = r_s_ring_subgraph(node_idx=vertex, r=r, s=s, edge_index=graph_data.edge_index, relabel_nodes=True, num_nodes = graph_data.num_nodes)
     return Data(x=graph_data.x[_subset], edge_index=_edge_index)
+
+def read_metadata_file(path: str):
+    if not osp.exists(path):
+        raise FileNotFoundError
+    else:
+        with open(path, "r") as file:
+            metadata = json.loads(file.read())
+
+    return metadata

@@ -1,21 +1,62 @@
 import os.path as osp
 import numpy as np
+import os
 
-#load dataset
-#select graph
-#foreach vertex
-#generate subgraph by k-disk
+from clustering import Clustering_Algorithm, Vertex_Partition_Clustering
+import util
+import gnn_utils
 
+def run_experiment(root_path: str, working_path: str, vertex_feature_metadata_path: str):
 
+    vertex_feature_metadata = util.read_metadata_file(path = osp.join(root_path, vertex_feature_metadata_path))
+
+    # create a clustering with lsa
+    clusterer = Vertex_Partition_Clustering(absolute_path_prefix = root_path)
+    feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
+    dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
+
+    # split_prop is expected to be
+    # ["desc"]
+    # ["split_mode"]
+    # ["num_samples"]
+    # ["split_idx"] if split_mode is 'CV'
+    split_desc = "Test_desc"
+    split_mode = "Test"
+    num_samples = -2
+    split_idx = -1
+    split_prop = { "desc" : split_desc, "split_mode" : split_mode, "num_samples" : num_samples, "split_idx" : split_idx}
+
+    clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split_prop = split_prop)
+    
+    # LSA
+    target_dim = 5
+    lsa_filename = f'{target_dim}_dim_lsa.pkl'
+    clusterer.generate_lsa(target_dimensions = target_dim, write_lsa_path = working_path, write_lsa_filename = lsa_filename)
+
+    clusterer.apply_lsa_to_dataset()
+
+    # k-means
+    mbk_n_clusters = 6
+    mbk_batch_size = 1024
+    mbk_n_init = 10
+    mbk_max_no_improvement = 10
+    mbk_max_iter = 1000
+
+    centroids_filename = f'{mbk_n_clusters}-means_centroids.txt'
+
+    labels, centroids, inertia, clustering_time = clusterer.mini_batch_k_means(n_clusters = mbk_n_clusters, batch_size = mbk_batch_size, n_init = mbk_n_init, max_no_improvement = mbk_max_no_improvement, max_iter = mbk_max_iter)
+
+    clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
+
+    metadata_filename = 'cluster_metadata.json'
+    clusterer.write_metadata(path = working_path, filename = metadata_filename)
+
+    # TODO: Test gnn_utils.py
 
 if __name__ == '__main__':
-    # Generate an empty cluster feature vector for testing purposes
+    # test gnn util
 
-    comment = 'Zero-vector to simulate MUTAG clustering into the same clustering class (simulate a "normal" GIN)'
-    num_vertices = 3371
-
-    path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
-    mutag_path = osp.join(path, "MUTAG")
-    clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels_zero.txt')
-
-    np.savetxt(fname = clusterlabels_path, X = np.zeros((num_vertices,1)), comments = '#', fmt = '%d', header = comment)
+    root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
+    working_path = osp.join('data', 'CSL', 'CSL_dataset', 'results', 'vertex_sp_features')
+    feature_metadata_path = osp.join(working_path, 'metadata.json')
+    run_experiment(root_path = root_path, working_path = osp.join(working_path, 'cluster-gnn'), vertex_feature_metadata_path = feature_metadata_path)
