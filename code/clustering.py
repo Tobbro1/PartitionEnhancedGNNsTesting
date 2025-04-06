@@ -39,6 +39,7 @@ import constants
 
 # own functionality
 from clarans import Clarans
+import util
 
 class Clustering_Algorithm(Enum):
     k_means = 0
@@ -264,8 +265,11 @@ class Vertex_Partition_Clustering():
 
         self.metadata["lsa"]["result_prop"]["num_features_seen"] = self.lsa.n_features_in_
         self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
+        sum_explained_var_ratio = 0.0
         for idx in range(self.lsa.explained_variance_.shape[0]):
             self.metadata["lsa"]["result_prop"]["explained_variances"][idx] = { "var" : self.lsa.explained_variance_[idx], "var_ratio" : self.lsa.explained_variance_ratio_[idx] }
+            sum_explained_var_ratio += self.lsa.explained_variance_ratio_[idx]
+        self.metadata["lsa"]["result_prop"]["explained_variances"]["total_ratio"] = sum_explained_var_ratio
 
         if write_lsa_path is not None:
             # Store the lsa object for potential later use
@@ -545,7 +549,7 @@ class Vertex_Partition_Clustering():
         self.metadata["data_split"] = split_prop
 
         if normalize:
-            self.dataset = prepocessing.normalize(data[split,2:], axis = 0)
+            self.dataset = prepocessing.normalize(data[split,2:], axis = 1)
         else:
             self.dataset = data[split,2:]
         self.vertex_identifier = data[split,0:2]
@@ -603,7 +607,7 @@ class Vertex_Partition_Clustering():
         self.metadata["result_prop"]["size"]["array"] = points.nbytes
 
         with open(data_path, "w") as file:
-            np.savetxt(fname = file, X = points, comments = '#', fmt = '%d', header = comment)
+            np.savetxt(fname = file, X = points, comments = '#', header = comment)
 
         self.metadata["result_prop"]["size"]["disk"] = os.stat(path = data_path).st_size
 
@@ -613,15 +617,7 @@ class Vertex_Partition_Clustering():
     
     def write_metadata(self, path: str, filename: str):
         path = osp.join(self.absolute_path_prefix, path)
-        if not osp.exists(path):
-            os.makedirs(path)
-
-        path = osp.join(path, filename)
-        if not osp.exists(path):
-            open(path, 'w').close()
-
-        with open(path, "w") as file:
-            file.write(json.dumps(self.metadata, indent=4))
+        util.write_metadata_file(path = path, filename = filename, data = self.metadata)
 
     # Write array of given labels into a file for storage (this is done in a human-readable/non-binary way for convenience)
     # NOTE: labels has to be a 1D or 2D array

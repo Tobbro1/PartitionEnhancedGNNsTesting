@@ -2,6 +2,10 @@
 from typing import List, Optional, Tuple, Union
 import json
 import os.path as osp
+import os
+import pickle
+
+import numpy as np
 
 #pytorch, pytorch geometric
 import torch
@@ -123,3 +127,55 @@ def read_metadata_file(path: str):
             metadata = json.loads(file.read())
 
     return metadata
+
+def write_metadata_file(path: str, filename: str, data) -> None:
+    if not osp.exists(path):
+        os.makedirs(path)
+
+    path = osp.join(path, filename)
+    if not osp.exists(path):
+        open(path, 'w').close()
+
+    with open(path, "w") as file:
+        file.write(json.dumps(data, indent=4))
+
+def write_numpy_txt(path: str, filename: str, data: np.array, comment: Optional[str]) -> None:
+    if comment is None:
+        comment = ""
+
+    if not osp.exists(path):
+        os.makedirs(path)
+
+    path = osp.join(path, filename)
+    if not osp.exists(path):
+        open(path, 'w').close()
+
+    with open(path, "w") as file:
+        np.savetxt(fname = file, X = data, comments = '#', header = comment)
+
+def read_numpy_txt(path: str) -> np.array:
+
+    if not osp.exists(path):
+        raise FileNotFoundError
+    
+    return np.loadtxt(fname = path, dtype = np.float64, comments = '#')
+
+def write_pickle(path: str, filename: str, obj) -> None:
+    if not osp.exists(path):
+        os.makedirs(path)
+
+    path = osp.join(path, filename)
+    if not osp.exists(path):
+        open(path, 'wb').close()
+
+    with open(path, 'wb') as file:
+        pickle.dump(obj = obj, file = file)
+
+def read_pickle(path: str):
+    if not osp.exists(path):
+        raise FileNotFoundError
+    
+    with open(path, 'rb') as f:
+        res = pickle.load(file = f)
+
+    return res

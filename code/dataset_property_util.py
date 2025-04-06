@@ -201,7 +201,7 @@ class Dataset_Properties_Manager():
 
     # Samples specifies the vertex_ids or graph_ids (depending on node_pred), for which the index lookup functions are computed
     # Returns a list of vertex indices that are considered in samples and graph indexes that are considered in graph_samples. Additionally returns the path of the pkl file where the lookups are stored on disk.
-    def initialize_idx_lookups(self, lookup_path: Optional[str], samples: Optional[List[int]] | Optional[Tensor], write_lookup_root_path: Optional[str], write_lookup_filename: Optional[str]) -> Tuple[List[int], List[int], str]:
+    def initialize_idx_lookups(self, lookup_path: Optional[str], samples: Optional[List[int]] | Optional[Tensor] = None, write_lookup_root_path: Optional[str] = None, write_lookup_filename: Optional[str] = None) -> Tuple[List[int], List[int], str]:
 
         lookup_disk_path = None
 

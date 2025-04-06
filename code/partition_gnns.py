@@ -1,4 +1,3 @@
-
 # General
 from typing import Optional, Tuple, Callable, Union
 
