@@ -2,7 +2,10 @@
 # Additionaly handles datasplits for k-fold CV
 
 # general imports
+from typing import Optional, List
 import os.path as osp
+
+import numpy as np
 
 # pytorch
 import torch
@@ -11,6 +14,9 @@ import pickle
 # pytorch geometric
 from torch_geometric.data import InMemoryDataset, Data, download_url
 from torch_geometric.utils import to_edge_index, remove_self_loops
+
+import util
+import constants
 
 class CSL_Dataset(InMemoryDataset):
 
@@ -74,11 +80,74 @@ class CSL_Dataset(InMemoryDataset):
 
         self.save(data_list, self.processed_paths[0])
 
+    def get_classes(self) -> List[int]:
+        return torch.unique(self.data.y).view(-1).tolist()
+
     # Generates a train, validation data split for k-fold CV (utilised on synthetic datasets)
-    # TODO: implement
-    def gen_train_val_split(self):
-        raise NotImplementedError
+    def gen_train_val_split(self, path: Optional[str] = None, write_path: Optional[str] = None, write_filename: Optional[str] = None):
+        
+        splits = {}
+
+        if path is not None:
+            splits = util.read_metadata_file(path = path)
+        else:
+            # generate test data
+
+            # We follow the split setup from https://proceedings.mlr.press/v97/murphy19a/murphy19a.pdf
+
+            # We need to construct balanced splits based on class
+            splits["test"] = []
+
+            classes = self.get_classes()
+
+            for c in classes:
+                possible_class_indices = (self.data.y.view(-1) == c).nonzero().view(-1)
+                possible_class_indices = np.array(possible_class_indices.tolist(), dtype = np.int64)
+
+                num_graphs = possible_class_indices.shape[0]
+
+                num_test_graphs = int(constants.k_fold_test_ratio * num_graphs)
+                possible_indices = np.array(range(num_graphs), dtype = np.int64)
+                test_indices = np.random.choice(possible_indices, size = num_test_graphs)
+                splits["test"].extend(possible_class_indices[test_indices].tolist())
+
+                # generate k folds
+                k = constants.num_k_fold
+
+                fold_indices = np.delete(possible_indices, test_indices)
+                num_remaining_graphs = fold_indices.shape[0]
+                num_select = int(num_remaining_graphs / k)
+
+                remaining_indices = np.copy(fold_indices)
+
+                for idx in range(k-1):
+                    splits[idx] = {}
+                    val_indices = np.random.choice(remaining_indices, size = num_select)
+
+                    splits[idx]["train"].extend(np.delete(possible_class_indices[fold_indices], val_indices).tolist())
+                    splits[idx]["val"].extend(possible_class_indices[fold_indices[val_indices]].tolist())
+
+                    remaining_indices = np.delete(remaining_indices, val_indices)
+
+                # last iteration gets the remaining graphs
+                idx = constants.num_k_fold - 1
+                splits[idx] = {}
+                val_indices = remaining_indices
+                splits[idx]["train"].extend(np.delete(possible_class_indices[fold_indices], val_indices).tolist())
+                splits[idx]["val"].extend(possible_class_indices[fold_indices[val_indices]].tolist())
+
+            # sort
+            for idx in range(constants.num_k_fold):
+                splits[idx]["train"].sort()
+                splits[idx]["val"].sort()
+
+            splits["test"].sort()
+
+            if write_path is not None:
+                self.write_train_val_split(splits = splits, path = write_path, filename = write_filename)
+
+        return splits
 
     # Writes a train, validation data split for k-fold CV into a file. Required if the vertex feature computation and partition GNN computation are done in seperate instances to ensure consistend data splits.
-    def write_train_val_split(self):
-        raise NotImplementedError
+    def write_train_val_split(self, splits, path: str, filename: str):
+        util.write_metadata_file(path = path, filename = filename, data = splits)
