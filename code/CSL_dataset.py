@@ -65,7 +65,7 @@ class CSL_Dataset(InMemoryDataset):
             num_vertices = adj.shape[0]
             # We remove self-loops from the graph. This should not impact the expressivity results and is more consistent with the definition.
             edge_index = remove_self_loops(edge_index = to_edge_index(adj = adj.to_sparse())[0])[0]
-            x = torch.zeros(num_vertices, dtype = torch.int64)
+            x = torch.zeros((num_vertices, 1), dtype = torch.int64)
             target_label = torch.tensor(target_labels[idx])
 
             data = Data(x = x, edge_index = edge_index, y = target_label)
@@ -81,10 +81,10 @@ class CSL_Dataset(InMemoryDataset):
         self.save(data_list, self.processed_paths[0])
 
     def get_classes(self) -> List[int]:
-        return torch.unique(self.data.y).view(-1).tolist()
+        return torch.unique(self._data.y).view(-1).tolist()
 
     # Generates a train, validation data split for k-fold CV (utilised on synthetic datasets)
-    def gen_train_val_split(self, path: Optional[str] = None, write_path: Optional[str] = None, write_filename: Optional[str] = None):
+    def gen_data_splits(self, path: Optional[str] = None, write_path: Optional[str] = None, write_filename: Optional[str] = None):
         
         splits = {}
 
@@ -96,52 +96,63 @@ class CSL_Dataset(InMemoryDataset):
             # We follow the split setup from https://proceedings.mlr.press/v97/murphy19a/murphy19a.pdf
 
             # We need to construct balanced splits based on class
-            splits["test"] = []
 
             classes = self.get_classes()
 
-            for c in classes:
-                possible_class_indices = (self.data.y.view(-1) == c).nonzero().view(-1)
-                possible_class_indices = np.array(possible_class_indices.tolist(), dtype = np.int64)
+            k = constants.num_k_fold
 
-                num_graphs = possible_class_indices.shape[0]
+            for idx in range(k):
+                splits[idx] = {}
+                splits[idx]["test"] = [] # Note that the test set is the same for each fold, we store it multiple times to be consistent with the Prox Dataset splits
+                splits[idx]["train"] = []
+                splits[idx]["val"] = []
+
+            # Index in which the larger validation set is put (if the size of a class is not divisable by k). Done to ensure roughly equal sizes of train/validation splits across folds.
+            cur_unbalanced_idx = 0
+            for c in classes:
+                possible_class_elements = (self._data.y.view(-1) == c).nonzero().view(-1)
+                possible_class_elements = np.array(possible_class_elements.tolist(), dtype = np.int64)
+
+                num_graphs = possible_class_elements.shape[0]
 
                 num_test_graphs = int(constants.k_fold_test_ratio * num_graphs)
                 possible_indices = np.array(range(num_graphs), dtype = np.int64)
-                test_indices = np.random.choice(possible_indices, size = num_test_graphs)
-                splits["test"].extend(possible_class_indices[test_indices].tolist())
+                test_indices = np.random.choice(possible_indices, size = num_test_graphs, replace = False)
+                test_indices_list = possible_class_elements[test_indices].tolist()
 
                 # generate k folds
-                k = constants.num_k_fold
 
-                fold_indices = np.delete(possible_indices, test_indices)
-                num_remaining_graphs = fold_indices.shape[0]
+                fold_elements = np.delete(possible_class_elements, test_indices)
+                num_remaining_graphs = fold_elements.shape[0]
                 num_select = int(num_remaining_graphs / k)
 
-                remaining_indices = np.copy(fold_indices)
+                remaining_elements = np.copy(fold_elements)
 
-                for idx in range(k-1):
-                    splits[idx] = {}
-                    val_indices = np.random.choice(remaining_indices, size = num_select)
+                for idx in range(k):
+                    splits[idx]["test"].extend(test_indices_list)
 
-                    splits[idx]["train"].extend(np.delete(possible_class_indices[fold_indices], val_indices).tolist())
-                    splits[idx]["val"].extend(possible_class_indices[fold_indices[val_indices]].tolist())
+                    if idx == cur_unbalanced_idx:
+                        continue
 
-                    remaining_indices = np.delete(remaining_indices, val_indices)
+                    val_elements = np.random.choice(remaining_elements, size = num_select, replace = False)
+                    splits[idx]["train"].extend(np.delete(fold_elements, np.isin(fold_elements, val_elements)).tolist())
+                    splits[idx]["val"].extend(val_elements.tolist())
+                    remaining_elements = np.delete(remaining_elements, np.isin(remaining_elements, val_elements))
 
                 # last iteration gets the remaining graphs
-                idx = constants.num_k_fold - 1
-                splits[idx] = {}
-                val_indices = remaining_indices
-                splits[idx]["train"].extend(np.delete(possible_class_indices[fold_indices], val_indices).tolist())
-                splits[idx]["val"].extend(possible_class_indices[fold_indices[val_indices]].tolist())
+                idx = cur_unbalanced_idx
+                val_elements = remaining_elements
+                splits[idx]["train"].extend(np.delete(fold_elements, np.isin(fold_elements, val_elements)).tolist())
+                splits[idx]["val"].extend(val_elements.tolist())
+
+                cur_unbalanced_idx += 1
+                cur_unbalanced_idx %= k
 
             # sort
-            for idx in range(constants.num_k_fold):
+            for idx in range(k):
                 splits[idx]["train"].sort()
                 splits[idx]["val"].sort()
-
-            splits["test"].sort()
+                splits[idx]["test"].sort()
 
             if write_path is not None:
                 self.write_train_val_split(splits = splits, path = write_path, filename = write_filename)

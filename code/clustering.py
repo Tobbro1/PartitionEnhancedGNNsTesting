@@ -24,6 +24,7 @@ import sklearn
 from sklearn.datasets import load_svmlight_file
 from sklearn.cluster import MiniBatchKMeans, OPTICS
 from sklearn.metrics.pairwise import pairwise_distances_argmin
+from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.decomposition import TruncatedSVD
 import sklearn.preprocessing as prepocessing
 
@@ -423,7 +424,7 @@ class Vertex_Partition_Clustering():
             plt.scatter(medoids[:, 0], medoids[:, 1], marker="x", s=169, linewidths=3, color="w", zorder=10,)
 
     # Returns a tuple of assignments, centroids, inertia and execution time of the clustering
-    def mini_batch_k_means(self, n_clusters: int, batch_size: int, n_init: int, max_no_improvement: int, max_iter: int) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    def mini_batch_k_means(self, n_clusters: int, batch_size: int, n_init: int, max_no_improvement: int, max_iter: int, min_cluster_size: int) -> Tuple[np.ndarray, np.ndarray, float, float]:
 
         t0 = time.time()
 
@@ -447,6 +448,7 @@ class Vertex_Partition_Clustering():
         self.metadata["config"]["num_clusters"] = n_clusters
         self.metadata["config"]["init_method"] = init_method
         self.metadata["config"]["max_iter"] = max_iter
+        self.metadata["config"]["min_cluster_size"] = min_cluster_size
         self.metadata["config"]["batch_size"] = batch_size
         self.metadata["config"]["max_no_improvement"] = max_no_improvement
         self.metadata["config"]["num_inits"] = n_init
@@ -459,24 +461,58 @@ class Vertex_Partition_Clustering():
         mbk.fit(self.dataset)
         labels = pairwise_distances_argmin(self.dataset, mbk.cluster_centers_)
 
-        num_centroids, num_dim = mbk.cluster_centers_.shape
-        inertia = mbk.inertia_
+        centroids = mbk.cluster_centers_
+
+        num_dim = centroids.shape[1]
         num_iter = mbk.n_iter_
         num_steps = mbk.n_steps_
         num_features_seen = mbk.n_features_in_
 
-        self.metadata["result_prop"]["num_centroids"] = num_centroids
+        # Check for minimum cluster size, if a cluster has too few labels assigned, merge this cluster with the closest other cluster 
+        # (by removing the centroid, then reassigning all vertices to check whether more clusters need to be merged). Start by checking the smallest cluster. This is not necessarily the best approach to merging
+        finished = False
+        num_clusters_merged = 0
+        while not finished:
+            finished = True
+            smallest_cluster = 0
+            smallest_cluster_size = float('inf')
+            for c in range(centroids.shape[0]):
+                size_cluster = labels[labels == c].shape[0]
+                if size_cluster < smallest_cluster_size:
+                    smallest_cluster = c
+                    smallest_cluster_size = size_cluster
+            
+            # Smallest cluster has been found
+            if smallest_cluster_size < min_cluster_size:
+                # Remove the corresponding centroid
+                centroids = np.delete(centroids, smallest_cluster, axis = 0)
+                # reassign all labels
+                labels = pairwise_distances_argmin(self.dataset, centroids)
+                num_clusters_merged += 1
+                finished = False
+        
+        if num_clusters_merged > 0:
+            # We have to recompute the inertia (sum of squared distances between each datapoint and its cluster) of the clusters in case we have merged clusters
+            inertia = 0.0
+            for c in range(centroids.shape[0]):
+                inertia += np.sum(euclidean_distances(X = self.dataset[(labels == c),:], Y = centroids[c,:].reshape(1,-1), squared = True), axis = 0, dtype = np.float64).item()
+        else:
+            inertia = mbk.inertia_
+
+
+        self.metadata["result_prop"]["num_centroids"] = centroids.shape[0]
         self.metadata["result_prop"]["num_dim"] = num_dim
         self.metadata["result_prop"]["inertia"] = inertia
         self.metadata["result_prop"]["num_iter"] = num_iter
         self.metadata["result_prop"]["num_steps"] = num_steps
+        self.metadata["result_prop"]["num_clusters_merged"] = num_clusters_merged
         self.metadata["result_prop"]["num_features_seen"] = num_features_seen
 
         execution_time = time.time() - t0
 
         self.metadata["times"]["clustering"] = execution_time
         
-        return labels, mbk.cluster_centers_, inertia, execution_time
+        return labels, centroids, inertia, execution_time
 
     # Returns a tuple of assignments and execution time of the clustering
     def optics(self, min_samples: int, max_eps: float = np.inf, n_jobs: int = None) -> Tuple[np.array, float]:

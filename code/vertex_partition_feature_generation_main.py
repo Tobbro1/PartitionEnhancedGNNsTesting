@@ -270,20 +270,25 @@ def run_csl(k_vals: Optional[List[int]] = None, r_vals: Optional[List[int]] = No
             gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = k_disk_sp_path, metadata_filename = metadata_filename, graph_mode = False)
             print(f"---   Finished generating CSL {k}-Disk SP features   ---")
 
-    if r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) > 0:
-        for r in r_vals:
-            for s in s_vals:
-                # Generate r-s-ring SP feature vectors
+    if r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) == len(r_vals):
+        for idx in range(r_vals):
+            # Generate r-s-ring SP feature vectors
 
-                r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
-                dataset_write_filename = f"CSL_{r}-{s}-ring_SP_features"
+            r = r_vals[idx]
+            s = s_vals[idx]
 
-                chunksize = constants.vertex_chunksize
+            if s < r:
+                continue
 
-                gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_csl, r = r, s = s, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
-                print(f"---   Generating CSL {r}-{s}-Ring SP features   ---")
-                gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
-                print(f"---   Finished generating CSL {r}-{s}-Ring SP features   ---")
+            r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
+            dataset_write_filename = f"CSL_{r}-{s}-ring_SP_features"
+
+            chunksize = constants.vertex_chunksize
+
+            gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_csl, r = r, s = s, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            print(f"---   Generating CSL {r}-{s}-Ring SP features   ---")
+            gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+            print(f"---   Finished generating CSL {r}-{s}-Ring SP features   ---")
 
 
 # Needs to be executed to download the proximity datasets. This is done here since multiple proximity datasets are bundled.
@@ -319,9 +324,19 @@ def run_proximity(h_vals: List[int], k_vals: Optional[List[int]] = None, r_vals:
 
     path = osp.join('data', 'Proximity')
 
+    possible_h = [1,3,5,8,10]
+
+    need_download = False
+    for h in possible_h:
+        if not osp.exists(osp.join(path, f'{h}-Prox')):
+            need_download = True
+
+    if need_download:
+        download_proximity(root = path)
+
     # sanity checks
-    assert [h in [1,3,5,8,10] for h in h_vals]
-    assert gen_vertex_sp_features or (k_vals is not None and len(k_vals) > 0) or (r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) > 0)
+    assert [h in possible_h for h in h_vals]
+    assert gen_vertex_sp_features or (k_vals is not None and len(k_vals) > 0) or (r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) == len(s_vals))
 
     # select some constant values
     num_processes = constants.num_processes
@@ -380,20 +395,24 @@ def run_proximity(h_vals: List[int], k_vals: Optional[List[int]] = None, r_vals:
                 gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = k_disk_sp_path, metadata_filename = metadata_filename, graph_mode = False)
                 print(f"---   Finished generating {h}-Prox {k}-Disk SP features   ---")
 
-        if r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) > 0:
-            for r in r_vals:
-                for s in s_vals:
-                    # Generate r-s-ring SP feature vectors
+        if r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) == len(r_vals):
+            for idx in range(len(r_vals)):
+                if s < r:
+                    continue
 
-                    r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
-                    dataset_write_filename = f"{h}-Prox_{r}-{s}-ring_SP_features"
+                # Generate r-s-ring SP feature vectors
+                r = r_vals[idx]
+                s = s_vals[idx]
 
-                    chunksize = constants.vertex_chunksize
+                r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
+                dataset_write_filename = f"{h}-Prox_{r}-{s}-ring_SP_features"
 
-                    gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_prox, r = r, s = s, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
-                    print(f"---   Generating {h}-Prox {r}-{s}-Ring SP features   ---")
-                    gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
-                    print(f"---   Finished generating {h}-Prox {r}-{s}-Ring SP features   ---")
+                chunksize = constants.vertex_chunksize
+
+                gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_prox, r = r, s = s, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+                print(f"---   Generating {h}-Prox {r}-{s}-Ring SP features   ---")
+                gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+                print(f"---   Finished generating {h}-Prox {r}-{s}-Ring SP features   ---")
 
 
 if __name__ == '__main__':

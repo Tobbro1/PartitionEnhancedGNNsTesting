@@ -163,6 +163,8 @@ cython_debug/
 
 # ignore data folder
 data/
+# ignore result folders
+experiments/
 # ignore note txt file
 general_implementation_notes.txt
 dataset_notes.txt

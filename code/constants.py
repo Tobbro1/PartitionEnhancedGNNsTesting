@@ -5,7 +5,7 @@ SEED = 37
 
 # Used for feature generation
 num_processes = 8
-graph_chunksize = 64    # Note that the chunksizes should be tested on hardware. If the parent process is limiting, the chunksize should be increased.
+graph_chunksize = 64    # Note that the chunksizes (graph + vertex) should be tested on hardware. If the parent process is the CPU bottleneck, the chunksize should be increased.
 vertex_chunksize = 512 
 vector_buffer_size = 16_384
 
@@ -19,4 +19,5 @@ mbk_n_init = 10
 mbk_max_no_improvement = 20
 mbk_max_iter = 2000
 
+# device = torch.device('cpu')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

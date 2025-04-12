@@ -56,14 +56,21 @@ class ProximityDataset(InMemoryDataset):
 
         self.save(data_list, self.processed_paths[0])
 
-    # Reads the corresponding data splits from disk
-    def get_data_splits(self):
+    # Reads the corresponding data splits from disk and converts them to a format consistent with the CSL data splits
+    # The splits are given in the following formal: List of Dictionaries containing test and model_selection, model_selection is a list of dictionaries train, validation indices
+    def gen_data_splits(self):
         splits = None
 
-        with open(osp.join(self.root, f"{self.h}-Prox", f"{self.h}-Prox_splits.json"), 'r') as f:
+        with open(osp.join(self.root, f"{self.h}-Prox_splits.json"), 'r') as f:
             splits = json.load(f)
 
-        return splits
-    
-    # Parses a data split
+        result = {}
+        for idx, split in enumerate(splits):
+
+            result[idx] = {}
+            result[idx]["train"] = split["model_selection"][0]["train"]
+            result[idx]["val"] = split["model_selection"][0]["validation"]
+            result[idx]["test"] = split["test"]
+
+        return result
     

@@ -36,17 +36,21 @@ import util
 # Transforms the features of the given dataset to include the cluster_id so they can be utilised in partition_enhanced_gnns
 # Recommended usage is giving the path of a metadata output of a feature vector computation as input, otherwise all other attributes must be set
 # Returns the transformed dataset and 
-def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix: str, feature_metadata_path: Optional[str], cluster_metadata_path: str) -> Tuple[Dataset, float]:
+def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix: str, feature_metadata_path: Optional[str] = None, feature_metadata: Optional[Dict] = None, cluster_metadata_path: Optional[str] = None, cluster_metadata: Optional[Dict] = None) -> Tuple[Dataset, float]:
 
     # cluster_alg: Clustering_Algorithm, centroids: Optional[np.array] = None, medoids: Optional[np.array] = None
     # , database_feature_vectors_path: Optional[str], feature_identifier: Optional[Dict[str, str]], dataset_properties_path: Optional[str], lookup_path: Optional[str]
     t0 = time.time()
 
     # sanity checks of the input
-    assert feature_metadata_path is not None
-    assert cluster_metadata_path is not None
+    assert feature_metadata_path is not None or feature_metadata is not None
+    assert cluster_metadata_path is not None or cluster_metadata is not None
 
-    cluster_metadata = util.read_metadata_file(path = osp.join(absolute_path_prefix, cluster_metadata_path))
+    if feature_metadata is None:
+        feature_metadata = util.read_metadata_file(path = osp.join(absolute_path_prefix, feature_metadata_path))
+
+    if cluster_metadata is None:
+        cluster_metadata = util.read_metadata_file(path = osp.join(absolute_path_prefix, cluster_metadata_path))
 
     centroids = None
     medoids = None
@@ -63,13 +67,7 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
     if cluster_metadata["lsa"]["lsa_used"]:
         lsa = util.read_pickle(path = osp.join(absolute_path_prefix, cluster_metadata["lsa"]["path"]))
 
-    # Read relevant dataset feature info from metadata file
-
-    feature_metadata = {}
-
-    path = osp.join(absolute_path_prefix, feature_metadata_path)
-    feature_metadata = util.read_metadata_file(path = path)
-        
+    # Read relevant dataset feature info from metadata file      
     database_feature_vectors_path = feature_metadata["result_prop"]["path"]
     feature_identifier = feature_metadata["result_prop"]["feature_identifier"]
     dataset_properties_path = feature_metadata["dataset_prop"]["properties_file_path"]
@@ -120,7 +118,7 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
     # This access is again strongly discouraged and bad practice.
     if dataset._data.x.dim() == 1:
          dataset._data.x = dataset._data.x.view(-1,1)
-    dataset._data.x = torch.cat((total_clustering_id_vector.view(-1,1), dataset._data.x), dim = 1)
+    dataset._data.x = torch.cat((total_clustering_id_vector.view(-1,1), dataset._data.x.view(-1,1)), dim = 1)
 
     return dataset, time.time() - t0
 
@@ -236,6 +234,21 @@ def get_cluster_ids_from_feature_vectors(feature_vectors: List[np.ndarray], clus
     if cluster_alg == Clustering_Algorithm.k_means:
         assert centroids is not None
         feature_vectors = np.vstack(feature_vectors)
+        # Determine whether the centroids have 1D features or whether the centroids have only one element
+        if feature_vectors.shape[1] == 1:
+            # 1D features
+            if np.ndim(centroids) == 0:
+                # 1 centroid
+                centroids = centroids.reshape(1,1)
+            else:
+                # more than 1 centroid
+                centroids = centroids.reshape(-1,1)
+        else:
+            # more than 1D features
+            if len(centroids.shape) == 1:
+                # Only one centroid
+                centroids = centroids.reshape(1,-1)
+
         result = torch.tensor(pairwise_distances_argmin(feature_vectors, centroids))
     elif cluster_alg == Clustering_Algorithm.clarans:
         assert medoids is not None

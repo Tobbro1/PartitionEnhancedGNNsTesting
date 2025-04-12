@@ -1,79 +1,363 @@
 import os.path as osp
 import numpy as np
 import os
+from typing import Dict, List
 
-from clustering import Clustering_Algorithm, Vertex_Partition_Clustering
 import util
-import gnn_utils
-
-from CSL_dataset import CSL_Dataset
 import constants
 
-def run_experiment(root_path: str, working_path: str, vertex_feature_metadata_path: str):
+from experiments import Experiment_Manager
+from vertex_partition_feature_generation_main import run_csl, run_proximity
 
-    vertex_feature_metadata = util.read_metadata_file(path = osp.join(root_path, vertex_feature_metadata_path))
+# Defines an example config file for a run and creates it
+def gen_experiment_config_file(root_path: str) -> None:
+    path = osp.join(root_path, 'experiments', 'configs')
+    filename = 'example_experiment.json'
 
-    # create a clustering with lsa
-    clusterer = Vertex_Partition_Clustering(absolute_path_prefix = root_path)
-    feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
-    dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
+    config = {}
+    config["type"] = "experiment"
+    config["title"] = "---   filename of the result (without extension)   ---"
+    config["general"] = {}
+    config["general"]["seed"] = constants.SEED
+    config["general"]["num_reruns"] = constants.num_reruns
+    config["general"]["num_k_fold"] = constants.num_k_fold
+    config["general"]["k_fold_test_ratio"] = constants.k_fold_test_ratio
+    config["dataset"] = {}
+    config["dataset"]["dataset_str"] = "---   'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
+    config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
+    config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["is_vertex_sp_feature"] = False
+    config["dataset"]["normalize_vertex_features"] = False
+    config["hyperparameters"] = {}
+    config["hyperparameters"]["num_clusters"] = ["---   List of the numbers of clusters that will be evaluated   ---"]
+    config["hyperparameters"]["lsa_dims"] = ["---   List of the numbers of lsa dimensions that will be evaluated. NOTE: values smaller than 1 mean no dimensionality reduction is performed   ---"]
+    config["hyperparameters"]["min_cluster_size"] = ["---   List of the minimum sizes of clusters that will be evaluated   ---"]
+    config["hyperparameters"]["num_layers"] = ["---   List of the number of layers of gnns that will be evaluated   ---"]
+    config["hyperparameters"]["num_hidden_channels"] = ["---   List of the number hidden dimensions of gnns that will be evaluated   ---"]
+    config["hyperparameters"]["num_batch_sizes"] = ["---   Defines the batch sizes of gnns while training   ---"]
+    config["hyperparameters"]["num_epochs"] = ["---   List of the number of epochs while training gnns that will be evaluated   ---"]
+    config["hyperparameters"]["lrs"] = ["---   List of the learning rates that will be evaluated   ---"]
 
-    # split_prop is expected to be
-    # ["desc"]
-    # ["split_mode"]
-    # ["num_samples"]
-    # ["split_idx"] if split_mode is 'CV'
-    split_desc = "Test_desc"
-    split_mode = "Test"
-    num_samples = -2
-    split_idx = -1
-    split_prop = { "desc" : split_desc, "split_mode" : split_mode, "num_samples" : num_samples, "split_idx" : split_idx}
-    normalize = True
+    util.write_metadata_file(path = path, filename = filename, data = config)
 
-    clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split_prop = split_prop, normalize = normalize)
-    
-    # LSA
-    target_dim = 2
-    lsa_filename = f'{target_dim}_dim_lsa.pkl'
-    clusterer.generate_lsa(target_dimensions = target_dim, write_lsa_path = working_path, write_lsa_filename = lsa_filename)
+def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
 
-    clusterer.apply_lsa_to_dataset()
+    path = osp.join(root_path, 'experiments', 'results')
 
-    # k-means
-    mbk_n_clusters = 6
-    mbk_batch_size = 1024
-    mbk_n_init = 10
-    mbk_max_no_improvement = 10
-    mbk_max_iter = 1000
+    # Parse the config and sanitize the input
+    assert config["type"] == "experiment"
+    assert "general" in config
+    assert "dataset" in config
+    assert "hyperparameters" in config
 
-    centroids_filename = f'{mbk_n_clusters}-means_centroids.txt'
+    k = None
+    r = None
+    s = None
+    is_vertex_sp_features = False
+    num_clusters = None
+    lsa_dims = None
+    min_cluster_sizes = None
+    num_layers = None
+    hidden_channels = None
+    batch_sizes = None
+    num_epochs = None
+    lrs = None
+    normalize = False
+    dataset_str = ''
+    base_model = ''
 
-    labels, centroids, inertia, clustering_time = clusterer.mini_batch_k_means(n_clusters = mbk_n_clusters, batch_size = mbk_batch_size, n_init = mbk_n_init, max_no_improvement = mbk_max_no_improvement, max_iter = mbk_max_iter)
+    # Parse config
+    for key, value in config["general"].items():
+        if key == "seed":
+            assert isinstance(value, int)
+            assert value >= 0
+            constants.SEED = value
+        elif key == "num_reruns":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.num_reruns = value
+        elif key == "num_k_fold":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.num_k_fold = value
+        elif key == "k_fold_test_ratio":
+            assert isinstance(value, float)
+            assert value > 0 and value < 1
+            constants.k_fold_test_ratio = value
+        else:
+            raise ValueError(f'Invalid key {key} in config["general"]')
 
-    clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
+    for key, value in config["dataset"].items():
+        if key == "dataset_str":
+            assert isinstance(value, str)
+            if value == 'CSL':
+                dataset_str = value
+            elif value.endswith('-Prox'):
+                h = value[0]
+                assert isinstance(h, int) and h in [1,3,5,8,10]
+                assert value == f'{h}-Prox'
+                dataset_str = value
+            else:
+                raise ValueError(f'Invalid dataset_str: {value}')
+        elif key == "k":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            k = value
+        elif key == "r":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            if s is not None:
+                assert len(s) == len(value)
+                for idx in range(len(s)):
+                    assert s[idx] <= value[idx]
+            r = value
+        elif key == "s":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            if r is not None:
+                assert len(r) == len(value)
+                for idx in range(len(r)):
+                    assert s[idx] >= value[idx]
+            s = value
+        elif key == "is_vertex_sp_feature":
+            assert isinstance(value, bool)
+            is_vertex_sp_features = value
+        elif key == "normalize_vertex_features":
+            assert isinstance(value, bool)
+            normalize = value
+        elif key == "base_model":
+            assert isinstance(value, str)
+            assert value == 'gin' or value == 'gcn'
+            base_model = value
+        else:
+            raise ValueError(f'Invalid key {key} in config["dataset"]')
+        
+    assert dataset_str is not None and base_model is not None
+    assert k is not None or (r is not None and s is not None) or is_vertex_sp_features
 
-    metadata_filename = 'cluster_metadata.json'
-    clusterer.write_metadata(path = working_path, filename = metadata_filename)
+    for key, value in config["hyperparameters"].items():
+        if key == "num_clusters":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            num_clusters = value
+        elif key == "lsa_dims":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            lsa_dims = value
+        elif key == "min_cluster_size":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            min_cluster_sizes = value
+        elif key == "num_layers":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            num_layers = value
+        elif key == "num_hidden_channels":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            hidden_channels = value
+        elif key == "num_batch_sizes":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            batch_sizes = value
+        elif key == "num_epochs":
+            assert isinstance(value, List[int])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            num_epochs = value
+        elif key == "lrs":
+            assert isinstance(value, List[float])
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            lrs = value
+        else:
+            raise ValueError(f'Invalid key {key} in config["hyperparameters"]')
+        
+    manager = Experiment_Manager(root_path = root_path)
 
-    # TODO: Test gnn_utils.py
-    csl_path = osp.join('data', 'CSL', 'CSL_dataset')
-    dataset_csl = CSL_Dataset(root = osp.join(root_path, csl_path))
+    try:
+        manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
+                                    lsa_dims = lsa_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
+                                    num_epochs = num_epochs, lrs = lrs, normalize_features = normalize)
+        
+        manager.run_experiments()
 
-    feature_metadata_path = vertex_feature_metadata_path
-    cluster_metadata_path = osp.join(working_path, metadata_filename)
+        if "title" in config and isinstance(config["title"], str) and len(config["title"]) > 0:
+            filename = f'{config["title"]}.json'
+        else:
+            filename = f'experiment_{experiment_idx}_result.json'
 
-    print(dataset_csl[0].x)
+        util.write_metadata_file(data = manager.data, path = path, filename = filename)
 
-    dataset_csl, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset_csl, absolute_path_prefix = root_path, feature_metadata_path = feature_metadata_path, cluster_metadata_path = cluster_metadata_path)
+    except Exception as e:
+        if "title" in config and isinstance(config["title"], str) and len(config["title"]) > 0:
+            filename = f'{config["title"]}.json'
+        else:
+            filename = f'experiment_{experiment_idx}_result.json'
+        print(repr(e))
+        util.write_metadata_file(data = repr(e), path = path, filename = filename)
 
-    print(dataset_csl[0].x)
+# Defines an example config file for a feature generation and creates it
+def gen_feature_gen_config_file(root_path: str) -> None:
+    path = osp.join(root_path, 'experiments', 'configs')
+    filename = 'example_feature_gen.json'
+
+    config = {}
+    config["type"] = "feature_gen"
+    config["general"] = {}
+    config["general"]["seed"] = constants.SEED
+    config["general"]["num_processes"] = constants.num_processes
+    config["general"]["graph_chunksize"] = constants.graph_chunksize
+    config["general"]["vertex_chunksize"] = constants.vertex_chunksize
+    config["general"]["vector_buffer_size"] = constants.vector_buffer_size
+    config["dataset"] = {}
+    config["dataset"]["dataset_str"] = "---   'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
+    config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["gen_vertex_sp_features"] = False
+    config["dataset"]["re_gen_properties"] = True
+
+    util.write_metadata_file(path = path, filename = filename, data = config)
+
+def run_feature_gen(config: Dict, root_path: str) -> None:
+
+    # Parse the config and sanitize the input
+    assert config["type"] == "feature_gen"
+    assert "general" in config
+    assert "dataset" in config
+
+    h = None
+    k = None
+    r = None
+    s = None
+    gen_vertex_sp_features = False
+    re_gen_properties = True
+    dataset_str = ''
+
+    # Parse config
+    for key, value in config["general"].items():
+        if key == "seed":
+            assert isinstance(value, int)
+            assert value >= 0
+            constants.SEED = value
+        elif key == "num_processes":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.num_processes = value
+        elif key == "graph_chunksize":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.graph_chunksize = value
+        elif key == "vertex_chunksize":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.vertex_chunksize = value
+        elif key == "vector_buffer_size":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.vector_buffer_size = value
+        else:
+            raise ValueError(f'Invalid key {key} in config["general"]')
+
+    for key, value in config["dataset"].items():
+        if key == "dataset_str":
+            assert isinstance(value, str)
+            if value == 'CSL':
+                dataset_str = value
+            elif value.endswith('-Prox'):
+                h = value[0]
+                assert isinstance(h, int) and h in [1,3,5,8,10]
+                assert value == f'{h}-Prox'
+                dataset_str = value
+            else:
+                raise ValueError(f'Invalid dataset_str: {value}')
+        elif key == "k":
+            assert isinstance(value, List[int])
+            assert [x > 0 for x in value]
+            k = value
+        elif key == "r":
+            assert isinstance(value, List[int])
+            assert [x > 0 for x in value]
+            if s is not None and len(s) > 0 and len(s) == len(value):
+                for idx in range(len(s)):
+                    assert s[idx] <= value[idx]
+            r = value
+        elif key == "s":
+            assert isinstance(value, List[int])
+            assert [x > 0 for x in value]
+            if r is not None and len(r) > 0 and len(r) == len(value):
+                for idx in range(len(r)):
+                    assert s[idx] >= value[idx]
+            s = value
+        elif key == "gen_vertex_sp_features":
+            assert isinstance(value, bool)
+            gen_vertex_sp_features = value
+        elif key == "re_gen_properties":
+            assert isinstance(value, bool)
+            re_gen_properties = value
+        else:
+            raise ValueError(f'Invalid key {key} in config["dataset"]')
+        
+    assert dataset_str is not None
+    assert (k is not None and len(k) > 0) or (r is not None and s is not None and len(r) > 0) or gen_vertex_sp_features
+
+    try:
+        if dataset_str == 'CSL':
+            run_csl(k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+        elif dataset_str.endswith('-Prox'):
+            run_proximity(h_vals = [h], k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+        else:
+            raise ValueError('datasetstr')
+    except Exception as e:
+        print(repr(e))
 
 if __name__ == '__main__':
     # test gnn util
 
-    constants.initialize_random_seeds()
+    mode = 1
 
     root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
-    working_path = osp.join('data', 'CSL', 'CSL_dataset', 'results', 'vertex_sp_features')
-    feature_metadata_path = osp.join(working_path, 'metadata.json')
-    run_experiment(root_path = root_path, working_path = osp.join(working_path, 'cluster-gnn'), vertex_feature_metadata_path = feature_metadata_path)
+
+    configs_path = osp.join(root_path, 'experiments', 'configs')
+
+    if mode == 0:
+        gen_experiment_config_file(root_path = root_path)
+        gen_feature_gen_config_file(root_path = root_path)
+    elif mode == 1:
+        dirlist = os.listdir(path = configs_path)
+
+        # We need to backup the experiment configs since we need to execute feature generations first
+        experiment_configs = []
+
+        for path in dirlist:
+            if path.endswith('.json'):
+                try:
+                    config = util.read_metadata_file(path = path)
+                    if "type" in config:
+                        if config["type"] == "experiment":
+                            # Run experiment
+                            experiment_configs.append(config)
+                        elif config["type"] == "feature_gen":
+                            # Generate features
+                            run_feature_gen(config = config, root_path = root_path)
+                except:
+                    pass
+            
+        # Run all experiments
+        for idx, experiment_config in enumerate(experiment_configs):
+            try:
+                run_experiment(config = experiment_config, root_path = root_path, experiment_idx = idx)
+            except Exception as e:
+                print(repr(e))

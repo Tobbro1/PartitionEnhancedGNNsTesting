@@ -1,5 +1,6 @@
 # General
 from typing import Optional, Tuple, Callable, Union
+from copy import deepcopy
 
 # Numpy
 import numpy as np
@@ -212,6 +213,7 @@ class GIN_Classic(torch.nn.Module):
         for l in range(self.num_layers):
             mlp = MLP([in_channels, hidden_channels, hidden_channels], act = 'relu')
             conv = GINConv(nn = mlp, train_eps = False)
+            conv.node_dim = 0
             self.convs.append(conv)
 
             # Saving parameter properties
@@ -267,7 +269,7 @@ class GIN_Classic(torch.nn.Module):
         layer_global_add_pool_res = torch.empty((self.num_layers, num_graphs_in_batch, self.hidden_channels), device = self.device)
 
         # We edit only the subset
-        for conv in self.convs:
+        for t, conv in enumerate(self.convs):
             
             x = conv(x, edge_index)
 
@@ -542,7 +544,7 @@ class GCN_Classic(torch.nn.Module):
         layer_global_add_pool_res = torch.empty((self.num_layers, num_graphs_in_batch, self.hidden_channels), device = self.device)
 
         # We edit only the subset
-        for conv in self.convs:
+        for t, conv in enumerate(self.convs):
             
             x = conv(x, edge_index)
 
@@ -567,7 +569,6 @@ class GNN_Manager():
         super().__init__()
 
         self.clustering_labels = None
-        self.dataset = None
         self.num_features = -1
         self.num_classes = -1
 
@@ -628,18 +629,14 @@ class GNN_Manager():
     #     self.clustering_labels = torch.from_numpy(np.loadtxt(fname = path, dtype = np.int32, comments = '#')).view(-1,1)
 
     # We need to modify the dataset such that each entry includes the original vertex_identifier to uniquely identify it later
-    def load_dataset(self, dataset: Dataset, num_clusters: int):
+    def set_dataset_parameters(self, num_features: int, num_classes: int, num_clusters: int):
 
-        self.dataset = dataset
-        self.num_features = self.dataset.num_features
-        # If we include the cluster_id, num_features is increased by one
-        if num_clusters > 0:
-            self.num_features -= 1
+        self.num_features = num_features
         self.num_clusters = num_clusters
-        self.num_classes = self.dataset.num_classes
+        self.num_classes = num_classes
 
     def generate_partition_enhanced_GIN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.dataset is not None
+        assert self.num_features > 0 and self.num_classes > 0 and self.num_clusters > 0
 
         self.model = Partition_enhanced_GIN(
             in_channels = self.num_features,
@@ -662,7 +659,7 @@ class GNN_Manager():
         self.metadata["optimizer"]["lr"] = lr
 
     def generate_classic_GIN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.dataset is not None
+        assert self.num_features > 0 and self.num_classes > 0
 
         self.model = GIN_Classic(
             in_channels = self.num_features,
@@ -684,7 +681,7 @@ class GNN_Manager():
         self.metadata["optimizer"]["lr"] = lr
 
     def generate_partition_enhanced_GCN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.dataset is not None
+        assert self.num_features > 0 and self.num_classes > 0 and self.num_clusters > 0
 
         num_clusters = torch.unique(self.clustering_labels).size(dim = 0)
 
@@ -711,7 +708,7 @@ class GNN_Manager():
         self.metadata["optimizer"]["lr"] = lr
 
     def generate_classic_GCN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.dataset is not None
+        assert self.num_features > 0 and self.num_classes > 0
 
         self.model = GCN_Classic(
             in_channels = self.num_features,
@@ -735,126 +732,126 @@ class GNN_Manager():
         self.metadata["optimizer"]["lr"] = lr
 
     def get_metadata(self):
-        return self.metadata
+        return deepcopy(self.metadata)
 
-def get_data_loaders(gnn: GNN_Manager, batch_size: int, shuffle: bool, training_ratio: float, test_ratio: float) -> Tuple[DataLoader, DataLoader, Optional[DataLoader]]:
-    assert gnn.dataset is not None
+# def get_data_loaders(gnn: GNN_Manager, batch_size: int, shuffle: bool, training_ratio: float, test_ratio: float) -> Tuple[DataLoader, DataLoader, Optional[DataLoader]]:
+#     assert gnn.dataset is not None
 
-    if training_ratio + test_ratio < 1:
-        train_loader = DataLoader(dataset = gnn.dataset[:training_ratio], batch_size = batch_size, shuffle = shuffle)
-        test_loader = DataLoader(dataset = gnn.dataset[training_ratio:training_ratio+test_ratio], batch_size = batch_size)
-        valid_loader = DataLoader(dataset = gnn.dataset[training_ratio+test_ratio:], batch_size = batch_size)
+#     if training_ratio + test_ratio < 1:
+#         train_loader = DataLoader(dataset = gnn.dataset[:training_ratio], batch_size = batch_size, shuffle = shuffle)
+#         test_loader = DataLoader(dataset = gnn.dataset[training_ratio:training_ratio+test_ratio], batch_size = batch_size)
+#         valid_loader = DataLoader(dataset = gnn.dataset[training_ratio+test_ratio:], batch_size = batch_size)
 
-        return train_loader, test_loader, valid_loader
-    else:
-        train_loader = DataLoader(dataset = gnn.dataset[:training_ratio], batch_size = batch_size, shuffle = shuffle)
-        test_loader = DataLoader(dataset = gnn.dataset[training_ratio:], batch_size = batch_size)
+#         return train_loader, test_loader, valid_loader
+#     else:
+#         train_loader = DataLoader(dataset = gnn.dataset[:training_ratio], batch_size = batch_size, shuffle = shuffle)
+#         test_loader = DataLoader(dataset = gnn.dataset[training_ratio:], batch_size = batch_size)
 
-        return train_loader, test_loader, None
+#         return train_loader, test_loader, None
 
-def train_partition_enhanced_GNN(gnn: GNN_Manager, train_loader: DataLoader):
-    device = constants.device
+# def train_partition_enhanced_GNN(gnn: GNN_Manager, train_loader: DataLoader):
+#     device = constants.device
     
-    gnn.model.train()
+#     gnn.model.train()
 
-    total_loss = 0
-    for data in train_loader:
-        data = data.to(device)
-        gnn.optimizer.zero_grad()
-        out = gnn.model(data)
-        loss = F.cross_entropy(out, data.y)
-        loss.backward()
-        gnn.optimizer.step()
-        total_loss += float(loss) * data.num_graphs
+#     total_loss = 0
+#     for data in train_loader:
+#         data = data.to(device)
+#         gnn.optimizer.zero_grad()
+#         out = gnn.model(data)
+#         loss = F.cross_entropy(out, data.y)
+#         loss.backward()
+#         gnn.optimizer.step()
+#         total_loss += float(loss) * data.num_graphs
 
-    return total_loss/len(train_loader.dataset)
+#     return total_loss/len(train_loader.dataset)
 
-@torch.no_grad()
-def test_partition_enhanced_GNN(gnn: GNN_Manager, test_loader: DataLoader):
-    device = constants.device
+# @torch.no_grad()
+# def test_partition_enhanced_GNN(gnn: GNN_Manager, test_loader: DataLoader):
+#     device = constants.device
 
-    gnn.model.eval()
+#     gnn.model.eval()
 
-    total_correct = 0
-    for data in test_loader:
-        data = data.to(device)
-        out = gnn.model(data)
-        pred = out.argmax(dim=-1)
-        total_correct += int((pred == data.y).sum())
+#     total_correct = 0
+#     for data in test_loader:
+#         data = data.to(device)
+#         out = gnn.model(data)
+#         pred = out.argmax(dim=-1)
+#         total_correct += int((pred == data.y).sum())
 
-    return total_correct/len(test_loader.dataset)
+#     return total_correct/len(test_loader.dataset)
 
-#Test zone
-if __name__ == '__main__':
+# #Test zone
+# if __name__ == '__main__':
 
-    # reproducability
-    constants.initialize_random_seeds()
+#     # reproducability
+#     constants.initialize_random_seeds()
 
-    torch.autograd.set_detect_anomaly(True)
+#     torch.autograd.set_detect_anomaly(True)
 
-    gnn_generator = GNN_Manager()
+#     gnn_generator = GNN_Manager()
 
-    root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
-    csl_path = osp.join('data', 'CSL', 'CSL_dataset')
-    dataset_csl = CSL_Dataset(root = osp.join(root_path, csl_path))
+#     root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
+#     csl_path = osp.join('data', 'CSL', 'CSL_dataset')
+#     dataset_csl = CSL_Dataset(root = osp.join(root_path, csl_path))
 
-    gnn_generator.load_dataset(dataset_csl, 0)
+#     gnn_generator.load_dataset(dataset_csl, 0)
 
-    gnn_generator.generate_classic_GIN_model(hidden_channels = 32, num_layers = 3, lr = 0.1)
+#     gnn_generator.generate_classic_GIN_model(hidden_channels = 32, num_layers = 3, lr = 0.1)
 
-    params = gnn_generator.model.parameters()
+#     params = gnn_generator.model.parameters()
 
-    for param in params:
-        print(type(param), param.size())
+#     for param in params:
+#         print(type(param), param.size())
 
-    # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
-    # mutag_path = osp.join(path, "MUTAG")
-    # dd_path = osp.join(path, "DD")
-    # mutag_dataset_filename = "k_disk_SP_features_MUTAG.svmlight"
-    # dd_dataset_filename = "k_disk_SP_features_DD.svmlight"
-    # dataset_path = osp.join(path, mutag_path, mutag_dataset_filename)
-    # # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels.txt')
-    # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels_zero.txt')
+#     # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
+#     # mutag_path = osp.join(path, "MUTAG")
+#     # dd_path = osp.join(path, "DD")
+#     # mutag_dataset_filename = "k_disk_SP_features_MUTAG.svmlight"
+#     # dd_dataset_filename = "k_disk_SP_features_DD.svmlight"
+#     # dataset_path = osp.join(path, mutag_path, mutag_dataset_filename)
+#     # # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels.txt')
+#     # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels_zero.txt')
 
-    # gnn_generator.read_clustering_labels(path = clusterlabels_path)
-    # # NOTE: force_reload needs to be set to True in order to update the clustering information in the dataset. When re-running the program with identical settings it may be left False. Otherwise read_clustering_labels does not apply the update leading to potentially incorrect, thus unpredictable behaviour
-    # gnn_generator.load_dataset(root_path=osp.join(path, 'enhanced_gnn'), dataset_name = 'MUTAG', force_reload = True)
+#     # gnn_generator.read_clustering_labels(path = clusterlabels_path)
+#     # # NOTE: force_reload needs to be set to True in order to update the clustering information in the dataset. When re-running the program with identical settings it may be left False. Otherwise read_clustering_labels does not apply the update leading to potentially incorrect, thus unpredictable behaviour
+#     # gnn_generator.load_dataset(root_path=osp.join(path, 'enhanced_gnn'), dataset_name = 'MUTAG', force_reload = True)
 
-    # batch_size = 128
-    # hidden_channels = 32
-    # num_layers = 3
-    # lr = 0.01
-    # epochs = 100
+#     # batch_size = 128
+#     # hidden_channels = 32
+#     # num_layers = 3
+#     # lr = 0.01
+#     # epochs = 100
 
-    # # Test the GIN
-    # print("Testing GIN: ")
+#     # # Test the GIN
+#     # print("Testing GIN: ")
 
-    # gnn_generator.generate_partition_enhanced_GIN_model(hidden_channels = hidden_channels, num_layers = num_layers, lr = lr)
+#     # gnn_generator.generate_partition_enhanced_GIN_model(hidden_channels = hidden_channels, num_layers = num_layers, lr = lr)
 
-    # train_loader, test_loader, valid_loader = get_data_loaders(gnn_generator, batch_size = batch_size, shuffle = True, training_ratio = 0.9, test_ratio = 0.1)
+#     # train_loader, test_loader, valid_loader = get_data_loaders(gnn_generator, batch_size = batch_size, shuffle = True, training_ratio = 0.9, test_ratio = 0.1)
 
-    # times = []
-    # for epoch in range(1, epochs + 1):
-    #     start = time.time()
-    #     loss = train_partition_enhanced_GNN(gnn = gnn_generator, train_loader = train_loader)
-    #     train_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = train_loader)
-    #     test_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = test_loader)
-    #     log(Epoch=epoch, Loss=loss, Train=train_acc, Test=test_acc)
-    #     times.append(time.time() - start)
-    # print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
+#     # times = []
+#     # for epoch in range(1, epochs + 1):
+#     #     start = time.time()
+#     #     loss = train_partition_enhanced_GNN(gnn = gnn_generator, train_loader = train_loader)
+#     #     train_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = train_loader)
+#     #     test_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = test_loader)
+#     #     log(Epoch=epoch, Loss=loss, Train=train_acc, Test=test_acc)
+#     #     times.append(time.time() - start)
+#     # print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
 
-    # # Test the GCN
-    # print("Testing GCN: ")
+#     # # Test the GCN
+#     # print("Testing GCN: ")
 
-    # gnn_generator.reset_parameters()
-    # gnn_generator.generate_partition_enhanced_GCN_model(hidden_channels = hidden_channels, num_layers = num_layers, lr = lr)
+#     # gnn_generator.reset_parameters()
+#     # gnn_generator.generate_partition_enhanced_GCN_model(hidden_channels = hidden_channels, num_layers = num_layers, lr = lr)
 
-    # times = []
-    # for epoch in range(1, epochs + 1):
-    #     start = time.time()
-    #     loss = train_partition_enhanced_GNN(gnn = gnn_generator, train_loader = train_loader)
-    #     train_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = train_loader)
-    #     test_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = test_loader)
-    #     log(Epoch=epoch, Loss=loss, Train=train_acc, Test=test_acc)
-    #     times.append(time.time() - start)
-    # print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
+#     # times = []
+#     # for epoch in range(1, epochs + 1):
+#     #     start = time.time()
+#     #     loss = train_partition_enhanced_GNN(gnn = gnn_generator, train_loader = train_loader)
+#     #     train_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = train_loader)
+#     #     test_acc = test_partition_enhanced_GNN(gnn = gnn_generator, test_loader = test_loader)
+#     #     log(Epoch=epoch, Loss=loss, Train=train_acc, Test=test_acc)
+#     #     times.append(time.time() - start)
+#     # print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
