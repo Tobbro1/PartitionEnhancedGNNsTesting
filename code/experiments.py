@@ -668,13 +668,13 @@ class Experiment_Manager():
                             # LSA
                             working_path = osp.join(vertex_feature_path, 'cluster-gnn', f'{idx}-split')
 
-                            if lsa_d > 0:
+                            if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
                                 lsa_filename = f'{lsa_d}_dim_lsa.pkl'
                                 clusterer.generate_lsa(target_dimensions = lsa_d, write_lsa_path = working_path, write_lsa_filename = lsa_filename)
                                 clusterer.apply_lsa_to_dataset()
 
                             # k-means
-                            if lsa_d > 0:
+                            if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
                                 centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{lsa_d}-lsa_centroids.txt'
                             else:
                                 centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
@@ -688,7 +688,7 @@ class Experiment_Manager():
                             if num_clusters > max_num_clusters:
                                 max_num_clusters = num_clusters
 
-                            if lsa_d > 0:
+                            if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
                                 metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{lsa_d}-lsa_cluster_metadata.json'
                             else:
                                 metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'

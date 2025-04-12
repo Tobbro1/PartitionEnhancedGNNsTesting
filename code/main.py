@@ -6,6 +6,11 @@ from typing import Dict, List
 import util
 import constants
 
+import torch
+
+from torch_geometric.data.data import DataEdgeAttr, DataTensorAttr
+from torch_geometric.data.storage import GlobalStorage
+
 from experiments import Experiment_Manager
 from vertex_partition_feature_generation_main import run_csl, run_proximity
 
@@ -95,35 +100,32 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
             if value == 'CSL':
                 dataset_str = value
             elif value.endswith('-Prox'):
-                h = value[0]
+                h = int(value[0])
                 assert isinstance(h, int) and h in [1,3,5,8,10]
                 assert value == f'{h}-Prox'
                 dataset_str = value
             else:
                 raise ValueError(f'Invalid dataset_str: {value}')
         elif key == "k":
-            assert isinstance(value, List[int])
-            assert len(value) > 0
-            assert [x > 0 for x in value]
-            k = value
+            if len(value) > 0:
+                assert [x > 0 for x in value]
+                k = value
         elif key == "r":
-            assert isinstance(value, List[int])
-            assert len(value) > 0
-            assert [x > 0 for x in value]
-            if s is not None:
-                assert len(s) == len(value)
-                for idx in range(len(s)):
-                    assert s[idx] <= value[idx]
-            r = value
+            if len(value) > 0:
+                assert len(value) > 0
+                assert [x > 0 for x in value]
+                if s is not None:
+                    assert len(s) == len(value)
+                    for idx in range(len(s)):
+                        assert s[idx] >= value[idx]
+                r = value
         elif key == "s":
-            assert isinstance(value, List[int])
-            assert len(value) > 0
-            assert [x > 0 for x in value]
-            if r is not None:
-                assert len(r) == len(value)
-                for idx in range(len(r)):
-                    assert s[idx] >= value[idx]
-            s = value
+            if len(value) > 0:
+                if r is not None:
+                    assert len(s) == len(value)
+                    for idx in range(len(r)):
+                        assert r[idx] <= value[idx]
+                s = value
         elif key == "is_vertex_sp_feature":
             assert isinstance(value, bool)
             is_vertex_sp_features = value
@@ -139,45 +141,41 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         
     assert dataset_str is not None and base_model is not None
     assert k is not None or (r is not None and s is not None) or is_vertex_sp_features
+    if r is not None:
+        assert s is not None
+    if s is not None:
+        assert r is not None
 
     for key, value in config["hyperparameters"].items():
         if key == "num_clusters":
-            assert isinstance(value, List[int])
             assert len(value) > 0
             assert [x > 0 for x in value]
             num_clusters = value
         elif key == "lsa_dims":
-            assert isinstance(value, List[int])
             assert len(value) > 0
             assert [x > 0 for x in value]
             lsa_dims = value
         elif key == "min_cluster_size":
-            assert isinstance(value, List[int])
             assert len(value) > 0
             assert [x > 0 for x in value]
             min_cluster_sizes = value
         elif key == "num_layers":
-            assert isinstance(value, List[int])
             assert len(value) > 0
             assert [x > 0 for x in value]
             num_layers = value
         elif key == "num_hidden_channels":
-            assert isinstance(value, List[int])
             assert len(value) > 0
             assert [x > 0 for x in value]
             hidden_channels = value
         elif key == "num_batch_sizes":
-            assert isinstance(value, List[int])
             assert len(value) > 0
             assert [x > 0 for x in value]
             batch_sizes = value
         elif key == "num_epochs":
-            assert isinstance(value, List[int])
             assert len(value) > 0
             assert [x > 0 for x in value]
             num_epochs = value
         elif key == "lrs":
-            assert isinstance(value, List[float])
             assert len(value) > 0
             assert [x > 0 for x in value]
             lrs = value
@@ -277,30 +275,30 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
             if value == 'CSL':
                 dataset_str = value
             elif value.endswith('-Prox'):
-                h = value[0]
+                h = int(value[0])
                 assert isinstance(h, int) and h in [1,3,5,8,10]
                 assert value == f'{h}-Prox'
                 dataset_str = value
             else:
                 raise ValueError(f'Invalid dataset_str: {value}')
         elif key == "k":
-            assert isinstance(value, List[int])
-            assert [x > 0 for x in value]
-            k = value
+            if len(value) > 0:
+                assert [x > 0 for x in value]
+                k = value
         elif key == "r":
-            assert isinstance(value, List[int])
-            assert [x > 0 for x in value]
-            if s is not None and len(s) > 0 and len(s) == len(value):
-                for idx in range(len(s)):
-                    assert s[idx] <= value[idx]
-            r = value
+            if len(value) > 0:
+                assert [x > 0 for x in value]
+                if s is not None and len(s) > 0 and len(s) == len(value):
+                    for idx in range(len(s)):
+                        assert s[idx] >= value[idx]
+                r = value
         elif key == "s":
-            assert isinstance(value, List[int])
-            assert [x > 0 for x in value]
-            if r is not None and len(r) > 0 and len(r) == len(value):
-                for idx in range(len(r)):
-                    assert s[idx] >= value[idx]
-            s = value
+            if len(value) > 0:
+                assert [x > 0 for x in value]
+                if r is not None and len(r) > 0 and len(r) == len(value):
+                    for idx in range(len(r)):
+                        assert r[idx] <= value[idx]
+                s = value
         elif key == "gen_vertex_sp_features":
             assert isinstance(value, bool)
             gen_vertex_sp_features = value
@@ -312,6 +310,10 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
         
     assert dataset_str is not None
     assert (k is not None and len(k) > 0) or (r is not None and s is not None and len(r) > 0) or gen_vertex_sp_features
+    if r is not None:
+        assert s is not None
+    if s is not None:
+        assert r is not None
 
     try:
         if dataset_str == 'CSL':
@@ -341,10 +343,13 @@ if __name__ == '__main__':
         # We need to backup the experiment configs since we need to execute feature generations first
         experiment_configs = []
 
+        # Required for pytorch version >= 2.6.0 since torch.load weights_only default value was changed from 'False' to 'True'
+        torch.serialization.add_safe_globals([DataEdgeAttr, DataTensorAttr, GlobalStorage])
+
         for path in dirlist:
             if path.endswith('.json'):
                 try:
-                    config = util.read_metadata_file(path = path)
+                    config = util.read_metadata_file(path = osp.join(configs_path, path))
                     if "type" in config:
                         if config["type"] == "experiment":
                             # Run experiment
@@ -352,8 +357,8 @@ if __name__ == '__main__':
                         elif config["type"] == "feature_gen":
                             # Generate features
                             run_feature_gen(config = config, root_path = root_path)
-                except:
-                    pass
+                except Exception as e:
+                    print(repr(e))
             
         # Run all experiments
         for idx, experiment_config in enumerate(experiment_configs):
