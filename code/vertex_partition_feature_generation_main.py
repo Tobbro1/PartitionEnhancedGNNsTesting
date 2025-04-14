@@ -201,6 +201,196 @@ def run_molhiv():
 def run_exp():
     raise NotImplementedError
 
+def run_ppa(k_vals: Optional[List[int]] = None, r_vals: Optional[List[int]] = None, s_vals: Optional[List[int]] = None, gen_vertex_sp_features: bool = False, root_path: Optional[str] = None, use_editmask: bool = False, re_gen_properties: bool = False) -> None:
+    
+    if root_path is None:
+        root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
+
+    absolute_path_prefix = root_path
+
+    path = osp.join('data', 'OGB')
+
+    # sanity checks
+    assert gen_vertex_sp_features or (k_vals is not None and len(k_vals) > 0) or (r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) > 0)
+
+    # select some constant values
+    num_processes = constants.num_processes
+    vector_buffer_size = constants.vector_buffer_size
+
+    result_mmap_path = osp.join(path, 'results.np')
+    editmask_mmap_path = osp.join(path, 'editmask.np')
+
+    path = osp.join(path, 'PPA')
+
+    dataset_ppa = PygGraphPropPredDataset(name = 'ogbg-ppa', root = osp.join(absolute_path_prefix, path))
+
+    # Remove features
+    dataset_ppa._data.x = torch.zeros((dataset_ppa._data.x.size()[0], 1), dtype = torch.long)
+    if dataset_ppa._data_list is not None:
+        for data in dataset_ppa._data_list:
+            data.x = torch.zeros((data.num_nodes, 1), dtype = torch.long)
+
+    output_path = osp.join(path, 'results')
+    dataset_prop_filename = "properties.json"
+    lookup_filename = "idx_lookup.pkl"
+    dataset_properties_path = osp.join(output_path, dataset_prop_filename)
+    lookup_path = osp.join(output_path, lookup_filename)
+
+    if not osp.exists(dataset_properties_path) or not osp.exists(lookup_path):
+        re_gen_properties = True
+
+    if re_gen_properties:
+        # Generate dataset properties and lookup files, they are later read and not generated again
+        prop_manager = Dataset_Properties_Manager(properties_path = None, dataset = dataset_ppa, node_pred = False, absolute_path_prefix = absolute_path_prefix, write_properties_root_path = output_path, write_properties_filename = dataset_prop_filename)
+        prop_manager.initialize_idx_lookups(lookup_path = None, samples = None, write_lookup_root_path = output_path, write_lookup_filename = lookup_filename)
+
+    dataset_desc = "OGBG-PPA"
+
+    metadata_filename = 'metadata.json'
+
+    if gen_vertex_sp_features:
+        # Generate Vertex SP features
+
+        vertex_sp_path = osp.join(output_path, f'vertex_SP_features')
+        dataset_write_filename = f"OGBG-PPA_vertex_SP_features"
+
+        chunksize = constants.graph_chunksize
+
+        gen = Vertex_SP_Feature_Generator(dataset = dataset_ppa, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = vertex_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+        print(f"---   Generating PPA Vertex SP features   ---")
+        gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = vertex_sp_path, metadata_filename = metadata_filename, graph_mode = True)
+        print(f"---   Finished generating PPA Vertex SP features   ---")
+
+    if k_vals is not None and len(k_vals) > 0:
+        for k in k_vals:
+            # Generate k-disk SP feature vectors
+
+            k_disk_sp_path = osp.join(output_path, f'{k}-disk_SP_features')
+            dataset_write_filename = f"PPA_{k}-disk_SP_features"
+
+            chunksize = constants.vertex_chunksize
+
+            gen = K_Disk_SP_Feature_Generator(dataset = dataset_ppa, k = k, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = k_disk_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            print(f"---   Generating PPA {k}-Disk SP features   ---")
+            gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = k_disk_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+            print(f"---   Finished generating PPA {k}-Disk SP features   ---")
+
+    if r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) == len(r_vals):
+        for idx in range(len(r_vals)):
+            # Generate r-s-ring SP feature vectors
+
+            r = r_vals[idx]
+            s = s_vals[idx]
+
+            if s < r:
+                continue
+
+            r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
+            dataset_write_filename = f"PPA_{r}-{s}-ring_SP_features"
+
+            chunksize = constants.vertex_chunksize
+
+            gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_ppa, r = r, s = s, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            print(f"---   Generating PPA {r}-{s}-Ring SP features   ---")
+            gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+            print(f"---   Finished generating PPA {r}-{s}-Ring SP features   ---")
+
+def run_molhiv(k_vals: Optional[List[int]] = None, r_vals: Optional[List[int]] = None, s_vals: Optional[List[int]] = None, gen_vertex_sp_features: bool = False, root_path: Optional[str] = None, use_editmask: bool = False, re_gen_properties: bool = False) -> None:
+    
+    if root_path is None:
+        root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
+
+    absolute_path_prefix = root_path
+
+    path = osp.join('data', 'OGB')
+
+    # sanity checks
+    assert gen_vertex_sp_features or (k_vals is not None and len(k_vals) > 0) or (r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) > 0)
+
+    # select some constant values
+    num_processes = constants.num_processes
+    vector_buffer_size = constants.vector_buffer_size
+
+    result_mmap_path = osp.join(path, 'results.np')
+    editmask_mmap_path = osp.join(path, 'editmask.np')
+
+    path = osp.join(path, 'MOL_HIV')
+
+    dataset_molhiv = PygGraphPropPredDataset(name = 'ogbg-molhiv', root = osp.join(absolute_path_prefix, path))
+
+    # Remove features
+    dataset_molhiv._data.x = torch.zeros((dataset_molhiv._data.x.size()[0], 1), dtype = torch.long)
+    if dataset_molhiv._data_list is not None:
+        for data in dataset_molhiv._data_list:
+            data.x = torch.zeros((data.num_nodes, 1), dtype = torch.long)
+
+    output_path = osp.join(path, 'results')
+    dataset_prop_filename = "properties.json"
+    lookup_filename = "idx_lookup.pkl"
+    dataset_properties_path = osp.join(output_path, dataset_prop_filename)
+    lookup_path = osp.join(output_path, lookup_filename)
+
+    if not osp.exists(dataset_properties_path) or not osp.exists(lookup_path):
+        re_gen_properties = True
+
+    if re_gen_properties:
+        # Generate dataset properties and lookup files, they are later read and not generated again
+        # We skip diameter calculation
+        prop_manager = Dataset_Properties_Manager(properties_path = None, dataset = dataset_molhiv, node_pred = False, absolute_path_prefix = absolute_path_prefix, write_properties_root_path = output_path, write_properties_filename = dataset_prop_filename)
+        prop_manager.initialize_idx_lookups(lookup_path = None, samples = None, write_lookup_root_path = output_path, write_lookup_filename = lookup_filename)
+
+    dataset_desc = "OGBG-MOL_HIV"
+
+    metadata_filename = 'metadata.json'
+
+    if gen_vertex_sp_features:
+        # Generate Vertex SP features
+
+        vertex_sp_path = osp.join(output_path, f'vertex_SP_features')
+        dataset_write_filename = f"OGBG-MOL_HIV_vertex_SP_features"
+
+        chunksize = constants.graph_chunksize
+
+        gen = Vertex_SP_Feature_Generator(dataset = dataset_molhiv, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = vertex_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+        print(f"---   Generating MOLHIV Vertex SP features   ---")
+        gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = vertex_sp_path, metadata_filename = metadata_filename, graph_mode = True)
+        print(f"---   Finished generating MOLHIV Vertex SP features   ---")
+
+    if k_vals is not None and len(k_vals) > 0:
+        for k in k_vals:
+            # Generate k-disk SP feature vectors
+
+            k_disk_sp_path = osp.join(output_path, f'{k}-disk_SP_features')
+            dataset_write_filename = f"MOLHIV_{k}-disk_SP_features"
+
+            chunksize = constants.vertex_chunksize
+
+            gen = K_Disk_SP_Feature_Generator(dataset = dataset_molhiv, k = k, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = k_disk_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            print(f"---   Generating MOLHIV {k}-Disk SP features   ---")
+            gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = k_disk_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+            print(f"---   Finished generating MOLHIV {k}-Disk SP features   ---")
+
+    if r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) == len(r_vals):
+        for idx in range(len(r_vals)):
+            # Generate r-s-ring SP feature vectors
+
+            r = r_vals[idx]
+            s = s_vals[idx]
+
+            if s < r:
+                continue
+
+            r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
+            dataset_write_filename = f"MOLHIV_{r}-{s}-ring_SP_features"
+
+            chunksize = constants.vertex_chunksize
+
+            gen = R_S_Ring_SP_Feature_Generator(dataset = dataset_molhiv, r = r, s = s, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            print(f"---   Generating MOLHIV {r}-{s}-Ring SP features   ---")
+            gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+            print(f"---   Finished generating MOLHIV {r}-{s}-Ring SP features   ---")
+
+
 # If None is passed as root_path, the parent directory of this file is chosen as the root directory
 def run_csl(k_vals: Optional[List[int]] = None, r_vals: Optional[List[int]] = None, s_vals: Optional[List[int]] = None, gen_vertex_sp_features: bool = False, root_path: Optional[str] = None, use_editmask: bool = False, re_gen_properties: bool = False) -> None:
 
@@ -397,13 +587,12 @@ def run_proximity(h_vals: List[int], k_vals: Optional[List[int]] = None, r_vals:
 
         if r_vals is not None and s_vals is not None and len(r_vals) > 0 and len(s_vals) == len(r_vals):
             for idx in range(len(r_vals)):
+                s = s_vals[idx]
+                r = r_vals[idx]
                 if s < r:
                     continue
 
                 # Generate r-s-ring SP feature vectors
-                r = r_vals[idx]
-                s = s_vals[idx]
-
                 r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
                 dataset_write_filename = f"{h}-Prox_{r}-{s}-ring_SP_features"
 

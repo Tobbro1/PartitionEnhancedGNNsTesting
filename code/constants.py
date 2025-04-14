@@ -15,9 +15,9 @@ num_k_fold = 5 # used for CSL experiments
 k_fold_test_ratio = 0.3 # used for CSL experiments
 # clustering
 mbk_batch_size = 1024
-mbk_n_init = 10
-mbk_max_no_improvement = 20
-mbk_max_iter = 2000
+mbk_n_init = 3
+mbk_max_no_improvement = 10
+mbk_max_iter = 100
 
 # device = torch.device('cpu')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

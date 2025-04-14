@@ -11,6 +11,8 @@ import os
 import pickle
 import json
 
+from copy import deepcopy
+
 # general
 from typing import Dict, Tuple, List, Optional
 from enum import Enum
@@ -55,6 +57,9 @@ class Vertex_Partition_Clustering():
 
         self.absolute_path_prefix = absolute_path_prefix
 
+        self.split = None
+
+        self.original_dataset = None
         self.dataset = None
         self.transformed_dataset = None
         self.vertex_identifier = None
@@ -145,7 +150,7 @@ class Vertex_Partition_Clustering():
 
 
     def reset_parameters_and_metadata(self) -> None:
-        self.dataset = None
+        self.dataset = np.copy(self.original_dataset[self.split])
         self.transformed_dataset = None
         self.vertex_identifier = None
 
@@ -262,7 +267,7 @@ class Vertex_Partition_Clustering():
 
         # n_components is the number of principal components that are utilised, thus the number of dimensions after the LSA
         self.lsa = TruncatedSVD(n_components = target_dimensions, algorithm = algorithm, n_iter = n_iter, n_oversamples = n_oversamples, power_iteration_normalizer = power_iteration_normalizer, tol = tol)
-        self.lsa.fit(self.dataset)
+        self.lsa.fit(self.original_dataset)
 
         self.metadata["lsa"]["result_prop"]["num_features_seen"] = self.lsa.n_features_in_
         self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
@@ -304,7 +309,7 @@ class Vertex_Partition_Clustering():
         
         self.metadata["lsa"]["lsa_used"] = True
 
-        self.dataset = self.lsa.transform(self.dataset)
+        self.dataset = self.lsa.transform(self.original_dataset)
 
         self.metadata["times"]["lsa_application"] = time.time() - t0
 
@@ -582,16 +587,23 @@ class Vertex_Partition_Clustering():
         if split is None:
             split = np.array(list(range(data.shape[0])))
 
-        self.metadata["data_split"] = split_prop
+        if split_prop is not None:
+            self.metadata["data_split"] = split_prop
 
         if normalize:
-            self.dataset = prepocessing.normalize(data[split,2:], axis = 1)
+            self.original_dataset = prepocessing.normalize(data[:,2:], axis = 1)
         else:
-            self.dataset = data[split,2:]
+            self.original_dataset = data[:,2:]
+        self.dataset = np.copy(self.original_dataset[split,:])
         self.vertex_identifier = data[split,0:2]
         self.num_vertices, self.num_features = self.dataset.shape
 
         self.metadata["times"]["read_from_disk"] = time.time() - t0
+
+    def set_split(self, split: Tensor, split_prop: Dict) -> None:
+        self.split = split
+        self.dataset = np.copy(self.original_dataset[split,:])
+        self.metadata["data_split"] = split_prop
 
     # Equivalent to executing generate_clustering_result_array_from_dict with the result of generate_clustering_result_dict but without the intermediary step
     def generate_clustering_result_array(self, labels) -> np.array:
@@ -660,6 +672,9 @@ class Vertex_Partition_Clustering():
     def write_clustering_labels(self, labels: np.array, path: str, comment: str) -> None:
         path = osp.join(self.absolute_path_prefix, path)
         np.savetxt(fname = path, X = labels, comments = '#', fmt = '%d', header = comment)
+
+    def get_metadata(self) -> Dict:
+        return deepcopy(self.metadata)
 
 #Test zone
 def cluster_molhiv(cluster_algs: List[Clustering_Algorithm], draw_res: bool, write_res: bool) -> None:

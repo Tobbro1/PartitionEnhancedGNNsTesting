@@ -17,7 +17,7 @@ from torch import Tensor
 
 # pytorch geometric
 from torch_geometric.data import Dataset
-from torch_geometric.utils import to_networkx
+from torch_geometric.utils import to_networkx, is_undirected
 
 # networkx
 import networkx as nx
@@ -29,7 +29,7 @@ class Dataset_Properties_Manager():
 
     # Requires either a path from which to read a properties json file or a dataset
     # NOTE: If this Manager is utilised for index conversion of an already computed feature vector dataset, it is 
-    def __init__(self, absolute_path_prefix: str, properties_path: Optional[str] = None, dataset: Optional[Dataset] = None, node_pred: bool = False, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None):
+    def __init__(self, absolute_path_prefix: str, properties_path: Optional[str] = None, dataset: Optional[Dataset] = None, node_pred: bool = False, skip_diameter: Optional[bool] = False, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None):
         super().__init__()
 
         self.node_pred = node_pred
@@ -77,7 +77,8 @@ class Dataset_Properties_Manager():
             self.properties["num_labels"] = 0
             self.properties["num_classes"] = dataset.num_classes
             self.properties["graph_size"] = {}
-            self.properties["diameter"] = {}
+            if not skip_diameter:
+                self.properties["diameter"] = {}
             self.properties["labels_per_graph"] = {}
             self.properties["time"] = float(-1)
             self.properties["node_pred"] = node_pred 
@@ -111,13 +112,16 @@ class Dataset_Properties_Manager():
                 self.properties["num_vertices"] += cur_graph_num_vertices
                 self.properties["graph_sizes"].append(cur_graph_num_vertices)
 
-                # Diameter
-                diameter = nx.diameter(G = to_networkx(data = cur_graph))
-                if diameter < min_diameter:
-                    min_diameter = diameter
-                if diameter > max_diameter:
-                    max_diameter = diameter
-                sum_diameter += diameter
+                if not skip_diameter:
+                    # Diameter
+                    nx_graph = to_networkx(data = cur_graph, to_undirected = True)
+                    if nx.is_connected(nx_graph):
+                        diameter = nx.diameter(G = nx_graph)
+                        if diameter < min_diameter:
+                            min_diameter = diameter
+                        if diameter > max_diameter:
+                            max_diameter = diameter
+                        sum_diameter += diameter
 
                 # Labels
                 if dataset.num_features == 1:
@@ -164,9 +168,10 @@ class Dataset_Properties_Manager():
             self.properties["graph_size"]["min"] = min_size
             self.properties["graph_size"]["max"] = max_size
 
-            self.properties["diameter"]["avg"] = avg_diameter
-            self.properties["diameter"]["min"] = min_diameter
-            self.properties["diameter"]["max"] = max_diameter
+            if not skip_diameter:
+                self.properties["diameter"]["avg"] = avg_diameter
+                self.properties["diameter"]["min"] = min_diameter
+                self.properties["diameter"]["max"] = max_diameter
 
             self.properties["labels_per_graph"]["avg"] = avg_labels
             self.properties["labels_per_graph"]["min"] = min_labels

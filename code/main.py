@@ -12,7 +12,7 @@ from torch_geometric.data.data import DataEdgeAttr, DataTensorAttr
 from torch_geometric.data.storage import GlobalStorage
 
 from experiments import Experiment_Manager
-from vertex_partition_feature_generation_main import run_csl, run_proximity
+from vertex_partition_feature_generation_main import run_csl, run_proximity, run_molhiv, run_ppa
 
 # Defines an example config file for a run and creates it
 def gen_experiment_config_file(root_path: str) -> None:
@@ -27,8 +27,12 @@ def gen_experiment_config_file(root_path: str) -> None:
     config["general"]["num_reruns"] = constants.num_reruns
     config["general"]["num_k_fold"] = constants.num_k_fold
     config["general"]["k_fold_test_ratio"] = constants.k_fold_test_ratio
+    config["general"]["mbk_batch_size"] = constants.mbk_batch_size
+    config["general"]["mbk_num_init"] = constants.mbk_n_init
+    config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
+    config["general"]["mbk_max_iter"] = constants.mbk_max_iter
     config["dataset"] = {}
-    config["dataset"]["dataset_str"] = "---   'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["dataset_str"] = "---   'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
     config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
     config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
@@ -73,6 +77,11 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     dataset_str = ''
     base_model = ''
 
+    config["general"]["mbk_batch_size"] = constants.mbk_batch_size
+    config["general"]["mbk_num_init"] = constants.mbk_n_init
+    config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
+    config["general"]["mbk_max_iter"] = constants.mbk_max_iter
+
     # Parse config
     for key, value in config["general"].items():
         if key == "seed":
@@ -91,13 +100,33 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
             assert isinstance(value, float)
             assert value > 0 and value < 1
             constants.k_fold_test_ratio = value
+        elif key == "mbk_batch_size":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.mbk_batch_size = value
+        elif key == "mbk_num_init":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.mbk_batch_size = value
+        elif key == "mbk_max_no_improvement":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.mbk_max_no_improvement = value
+        elif key == "mbk_max_iter":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.mbk_max_iter = value
         else:
             raise ValueError(f'Invalid key {key} in config["general"]')
 
     for key, value in config["dataset"].items():
         if key == "dataset_str":
             assert isinstance(value, str)
-            if value == 'CSL':
+            if value == 'ogbg-molhiv':
+                dataset_str = value
+            elif value == 'ogbg-ppa':
+                dataset_str = value
+            elif value == 'CSL':
                 dataset_str = value
             elif value.endswith('-Prox'):
                 h = int(value[0])
@@ -112,7 +141,6 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
                 k = value
         elif key == "r":
             if len(value) > 0:
-                assert len(value) > 0
                 assert [x > 0 for x in value]
                 if s is not None:
                     assert len(s) == len(value)
@@ -122,7 +150,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         elif key == "s":
             if len(value) > 0:
                 if r is not None:
-                    assert len(s) == len(value)
+                    assert len(r) == len(value)
                     for idx in range(len(r)):
                         assert r[idx] <= value[idx]
                 s = value
@@ -182,6 +210,9 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         else:
             raise ValueError(f'Invalid key {key} in config["hyperparameters"]')
         
+
+    util.initialize_random_seeds(constants.SEED)
+
     manager = Experiment_Manager(root_path = root_path)
 
     try:
@@ -220,7 +251,7 @@ def gen_feature_gen_config_file(root_path: str) -> None:
     config["general"]["vertex_chunksize"] = constants.vertex_chunksize
     config["general"]["vector_buffer_size"] = constants.vector_buffer_size
     config["dataset"] = {}
-    config["dataset"]["dataset_str"] = "---   'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["dataset_str"] = "---   'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
     config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
     config["dataset"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
@@ -230,6 +261,7 @@ def gen_feature_gen_config_file(root_path: str) -> None:
     util.write_metadata_file(path = path, filename = filename, data = config)
 
 def run_feature_gen(config: Dict, root_path: str) -> None:
+
 
     # Parse the config and sanitize the input
     assert config["type"] == "feature_gen"
@@ -272,7 +304,11 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
     for key, value in config["dataset"].items():
         if key == "dataset_str":
             assert isinstance(value, str)
-            if value == 'CSL':
+            if value == 'ogbg-molhiv':
+                dataset_str = value
+            elif value == 'ogbg-ppa':
+                dataset_str = value
+            elif value == 'CSL':
                 dataset_str = value
             elif value.endswith('-Prox'):
                 h = int(value[0])
@@ -315,8 +351,14 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
     if s is not None:
         assert r is not None
 
+    util.initialize_random_seeds(constants.SEED)
+
     try:
-        if dataset_str == 'CSL':
+        if dataset_str == 'ogbg-molhiv':
+            run_molhiv(k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+        elif dataset_str == 'ogbg-ppa':
+            run_ppa(k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+        elif dataset_str == 'CSL':
             run_csl(k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
         elif dataset_str.endswith('-Prox'):
             run_proximity(h_vals = [h], k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
@@ -324,6 +366,32 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
             raise ValueError('datasetstr')
     except Exception as e:
         print(repr(e))
+
+def shorten_experiment_res_file(root_path: str, filename: str):
+    data = util.read_metadata_file(path = osp.join(root_path, f'{filename}.json'))
+
+    # Remove single epoch/rerun/fold data for classic gnns
+    idx = 0
+    while str(idx) in data["classic_gnn_hyperparameter_opt"]["experiment_idx"]:
+        del data["classic_gnn_hyperparameter_opt"]["experiment_idx"][str(idx)]["splits"]
+        idx += 1
+
+    # Remove single epoch/rerun/fold data for clustering opt
+    idx = 0
+    while str(idx) in data["clustering_hyperparameter_opt"]["experiment_idx"]:
+        split_idx = 0
+        while str(split_idx) in data["clustering_hyperparameter_opt"]["experiment_idx"][str(idx)]["splits"]:
+            del data["clustering_hyperparameter_opt"]["experiment_idx"][str(idx)]["splits"][str(split_idx)]["rerun"]
+            split_idx += 1
+        idx += 1
+
+    # Remove single epoch/rerun/fold data for enhanced gnns
+    idx = 0
+    while str(idx) in data["enhanced_gnn_hyperparameter_opt"]["experiment_idx"]:
+        del data["enhanced_gnn_hyperparameter_opt"]["experiment_idx"][str(idx)]["splits"]
+        idx += 1
+
+    util.write_metadata_file(path = root_path, filename = f'{filename}_short.json', data = data)
 
 if __name__ == '__main__':
     # test gnn util
@@ -366,3 +434,9 @@ if __name__ == '__main__':
                 run_experiment(config = experiment_config, root_path = root_path, experiment_idx = idx)
             except Exception as e:
                 print(repr(e))
+
+    elif mode == 2:
+        path = osp.join(root_path, 'experiments', 'results')
+        filename = 'experiment_1_vertex_sp_gin'
+
+        shorten_experiment_res_file(root_path = path, filename = filename)
