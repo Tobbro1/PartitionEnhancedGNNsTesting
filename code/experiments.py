@@ -147,6 +147,7 @@ class Experiment_Manager():
         print(f'---   Starting experiments on {self.dataset_str}   ---')
 
         data = {}
+        data["dataset"] = self.dataset_str
         if self.dataset_str == 'ogbg-molhiv':
             data["loss_func"] = "BCE_with_logits_loss"
             data["metric"] = "rocauc"
@@ -796,6 +797,7 @@ class Experiment_Manager():
         print(f'---   Starting experiments on {self.dataset_str}   ---')
 
         data = {}
+        data["dataset"] = self.dataset_str
         data["loss_func"] = "cross_entropy"
         data["metric"] = "acc"
         data["overall_time"] = -1.0

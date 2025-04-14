@@ -150,7 +150,7 @@ class Vertex_Partition_Clustering():
 
 
     def reset_parameters_and_metadata(self) -> None:
-        self.dataset = np.copy(self.original_dataset[self.split])
+        self.dataset = None
         self.transformed_dataset = None
         self.vertex_identifier = None
 
@@ -309,7 +309,7 @@ class Vertex_Partition_Clustering():
         
         self.metadata["lsa"]["lsa_used"] = True
 
-        self.dataset = self.lsa.transform(self.original_dataset)
+        self.dataset = self.lsa.transform(self.original_dataset[self.split,:])
 
         self.metadata["times"]["lsa_application"] = time.time() - t0
 
@@ -587,6 +587,11 @@ class Vertex_Partition_Clustering():
         if split is None:
             split = np.array(list(range(data.shape[0])))
 
+        if isinstance(split, Tensor):
+            split = split.numpy()
+
+        self.split = split
+
         if split_prop is not None:
             self.metadata["data_split"] = split_prop
 
@@ -594,16 +599,17 @@ class Vertex_Partition_Clustering():
             self.original_dataset = prepocessing.normalize(data[:,2:], axis = 1)
         else:
             self.original_dataset = data[:,2:]
-        self.dataset = np.copy(self.original_dataset[split,:])
-        self.vertex_identifier = data[split,0:2]
+        self.dataset = self.original_dataset[self.split,:].copy()
+        self.vertex_identifier = data[self.split,0:2]
         self.num_vertices, self.num_features = self.dataset.shape
 
         self.metadata["times"]["read_from_disk"] = time.time() - t0
 
     def set_split(self, split: Tensor, split_prop: Dict) -> None:
-        self.split = split
-        self.dataset = np.copy(self.original_dataset[split,:])
+        self.split = split.numpy()
+        self.dataset = self.original_dataset[self.split,:].copy()
         self.metadata["data_split"] = split_prop
+        self.num_vertices, self.num_features = self.dataset.shape
 
     # Equivalent to executing generate_clustering_result_array_from_dict with the result of generate_clustering_result_dict but without the intermediary step
     def generate_clustering_result_array(self, labels) -> np.array:

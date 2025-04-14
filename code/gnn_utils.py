@@ -67,7 +67,8 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
                 if normalize:
                     feature_dataset = prepocessing.normalize(feature_dataset, axis = 1)
             else:
-                feature_dataset = np.copy(feature_dataset)
+                # If the features are passed, we have to copy them in order to ensure that we do not change the original dataset
+                feature_dataset = feature_dataset.copy()
 
             # apply lsa if necessary
             lsa = None
