@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+from torch_geometric.nn.norm import BatchNorm
 
 # Pytorch geometric
 from torch_geometric.data import Data, Dataset
@@ -60,7 +61,7 @@ class Partition_enhanced_GIN(torch.nn.Module):
 
     # In the GIN model the trainable parameters are represented by the MLPs applied after each aggregation, since the aggregation is a simple sum
 
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, num_clusters):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, num_clusters, use_batch_norm: bool):
         super().__init__()
 
         assert hidden_channels >= in_channels
@@ -71,9 +72,12 @@ class Partition_enhanced_GIN(torch.nn.Module):
         self.hidden_channels = hidden_channels
         self.hidden_in_channel_diff = hidden_channels - in_channels
 
+        self.use_batch_norm = use_batch_norm
+
         self.device = constants.device
 
         self.convs = torch.nn.ModuleList()
+        self.norm_convs = torch.nn.ModuleList()
 
         # properties of the parameters per layer and in total
         self.parameter_props = {}
@@ -94,6 +98,11 @@ class Partition_enhanced_GIN(torch.nn.Module):
                 conv = Partition_enhanced_GIN_conv(nn = mlp, train_eps = False)
                 convs_p.append(conv)
                 self.convs.append(conv)
+
+            if self.use_batch_norm:
+                batch_norm = BatchNorm(in_channels = hidden_channels)
+                self.norm_convs.append(batch_norm)
+                convs_p.append(batch_norm)
 
             # Saving parameter properties
             sum_p_layer = 0
@@ -137,6 +146,9 @@ class Partition_enhanced_GIN(torch.nn.Module):
     def reset_parameters(self):
         for conv in self.convs:
             conv.reset_parameters()
+        
+        for norm in self.norm_convs:
+            norm.reset_parameters()
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
@@ -166,6 +178,9 @@ class Partition_enhanced_GIN(torch.nn.Module):
                     x[mask,:] = self.convs[conv_idx](x, edge_index, mask)
                 # x = self.convs[conv_idx](torch.masked_select(x, mask), edge_index)
 
+            if self.use_batch_norm:
+                x = self.norm_convs[t](x)
+
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
             layer_global_add_pool_res[t,:,:] = global_add_pool(x, batch)
@@ -186,7 +201,7 @@ class Partition_enhanced_GIN(torch.nn.Module):
 class GIN_Classic(torch.nn.Module):
     # In the GIN model the trainable parameters are represented by the MLPs applied after each aggregation, since the aggregation is a simple sum
 
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, use_batch_norm: bool):
         super().__init__()
 
         assert hidden_channels >= in_channels
@@ -195,9 +210,12 @@ class GIN_Classic(torch.nn.Module):
 
         self.hidden_channels = hidden_channels
 
+        self.use_batch_norm = use_batch_norm
+
         self.device = constants.device
 
         self.convs = torch.nn.ModuleList()
+        self.norm_convs = torch.nn.ModuleList()
 
         # properties of the parameters per layer and in total
         self.parameter_props = {}
@@ -211,19 +229,28 @@ class GIN_Classic(torch.nn.Module):
         sum_p_size = 0
 
         for l in range(self.num_layers):
+            conv_p = []
+
             mlp = MLP([in_channels, hidden_channels, hidden_channels], act = 'relu')
             conv = GINConv(nn = mlp, train_eps = False)
             conv.node_dim = 0
             self.convs.append(conv)
+            conv_p.append(conv)
+
+            if self.use_batch_norm:
+                batch_norm = BatchNorm(in_channels = hidden_channels)
+                self.norm_convs.append(batch_norm)
+                conv_p.append(batch_norm)
 
             # Saving parameter properties
             sum_p_layer = 0
             sum_p_size_layer = 0
             dtype = None
-            for p in conv.parameters():
-                sum_p_layer += p.numel()
-                sum_p_size_layer += p.nbytes
-                dtype = str(p.dtype)
+            for conv in conv_p:
+                for p in conv.parameters():
+                    sum_p_layer += p.numel()
+                    sum_p_size_layer += p.nbytes
+                    dtype = str(p.dtype)
             sum_p += sum_p_layer
             sum_p_size += sum_p_size_layer
 
@@ -256,6 +283,9 @@ class GIN_Classic(torch.nn.Module):
     def reset_parameters(self):
         for conv in self.convs:
             conv.reset_parameters()
+
+        for conv in self.norm_convs:
+            conv.reset_parameters()
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
@@ -272,6 +302,9 @@ class GIN_Classic(torch.nn.Module):
         for t, conv in enumerate(self.convs):
             
             x = conv(x, edge_index)
+
+            if self.use_batch_norm:
+                x = self.norm_convs[t](x)
 
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
@@ -339,7 +372,7 @@ class Partition_enhanced_GCN(torch.nn.Module):
 
     # In the GCN model the trainable parameters are represented by the parameter matrices within the convolutions
 
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, num_clusters, normalize: bool = True, bias: bool = True):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, num_clusters, use_batch_norm: bool, normalize: bool = True, bias: bool = True):
         super().__init__()
 
         assert hidden_channels >= in_channels
@@ -350,9 +383,12 @@ class Partition_enhanced_GCN(torch.nn.Module):
         self.hidden_channels = hidden_channels
         self.hidden_in_channel_diff = hidden_channels - in_channels
 
+        self.use_batch_norm = use_batch_norm
+
         self.device = constants.device
 
         self.convs = torch.nn.ModuleList()
+        self.norm_convs = torch.nn.ModuleList()
 
         # properties of the parameters per layer and in total
         self.parameter_props = {}
@@ -371,6 +407,11 @@ class Partition_enhanced_GCN(torch.nn.Module):
                 conv = Partition_enhanced_GCN_conv(in_channels = in_channels, out_channels = hidden_channels, improved = False, cached = False, normalize = normalize, bias = bias)
                 convs_p.append(conv)
                 self.convs.append(conv)
+
+            if self.use_batch_norm:
+                batch_norm = BatchNorm(in_channels = hidden_channels)
+                self.norm_convs.append(batch_norm)
+                convs_p.append(batch_norm)
 
             # Saving parameter properties
             sum_p_layer = 0
@@ -414,6 +455,9 @@ class Partition_enhanced_GCN(torch.nn.Module):
     def reset_parameters(self):
         for conv in self.convs:
             conv.reset_parameters()
+
+        for conv in self.norm_convs:
+            conv.reset_parameters()
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
@@ -448,6 +492,9 @@ class Partition_enhanced_GCN(torch.nn.Module):
                 
             x = x2
 
+            if self.use_batch_norm:
+                x = self.norm_convs[t](x)
+
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
             layer_global_add_pool_res[t,:,:] = global_add_pool(x, batch)
@@ -463,7 +510,7 @@ class Partition_enhanced_GCN(torch.nn.Module):
 class GCN_Classic(torch.nn.Module):
     # In the GIN model the trainable parameters are represented by the MLPs applied after each aggregation, since the aggregation is a simple sum
 
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, normalize: bool = True, bias: bool = True):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, use_batch_norm: bool, normalize: bool = True, bias: bool = True):
         super().__init__()
 
         assert hidden_channels >= in_channels
@@ -471,10 +518,12 @@ class GCN_Classic(torch.nn.Module):
         self.num_layers = num_layers
 
         self.hidden_channels = hidden_channels
+        self.use_batch_norm = use_batch_norm
 
         self.device = constants.device
 
         self.convs = torch.nn.ModuleList()
+        self.norm_convs = torch.nn.ModuleList()
 
         # properties of the parameters per layer and in total
         self.parameter_props = {}
@@ -488,8 +537,16 @@ class GCN_Classic(torch.nn.Module):
         sum_p_size = 0
 
         for l in range(self.num_layers):
+            convs_p = []
+
             conv = GCNConv(in_channels = in_channels, out_channels = hidden_channels, improved = False, cached = False, normalize = normalize, bias = bias)
             self.convs.append(conv)
+            convs_p.append(conv)
+
+            if self.use_batch_norm:
+                batch_norm = BatchNorm(in_channels = hidden_channels)
+                self.norm_convs.append(batch_norm)
+                convs_p.append(batch_norm)
 
             # Saving parameter properties
             sum_p_layer = 0
@@ -531,6 +588,9 @@ class GCN_Classic(torch.nn.Module):
     def reset_parameters(self):
         for conv in self.convs:
             conv.reset_parameters()
+
+        for conv in self.norm_convs:
+            conv.reset_parameters()
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
@@ -547,6 +607,9 @@ class GCN_Classic(torch.nn.Module):
         for t, conv in enumerate(self.convs):
             
             x = conv(x, edge_index)
+
+            if self.use_batch_norm:
+                x = self.norm_convs[t](x)
 
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
@@ -643,7 +706,8 @@ class GNN_Manager():
             hidden_channels = hidden_channels,
             out_channels =  self.num_classes,
             num_layers = num_layers,
-            num_clusters = self.num_clusters
+            num_clusters = self.num_clusters,
+            use_batch_norm = constants.use_batch_norm
         ).to(self.device)
 
         self.metadata["gnn"]["desc"] = "enhanced_gin"
@@ -666,6 +730,7 @@ class GNN_Manager():
             hidden_channels = hidden_channels,
             out_channels =  self.num_classes,
             num_layers = num_layers,
+            use_batch_norm = constants.use_batch_norm
         ).to(self.device)
 
         self.metadata["gnn"]["desc"] = "classic_gin"
@@ -690,7 +755,8 @@ class GNN_Manager():
             hidden_channels = hidden_channels,
             out_channels =  self.num_classes,
             num_layers = num_layers,
-            num_clusters = num_clusters
+            num_clusters = num_clusters,
+            use_batch_norm = constants.use_batch_norm
         ).to(self.device)
 
         self.metadata["gnn"]["desc"] = "enhanced_gcn"
@@ -715,6 +781,7 @@ class GNN_Manager():
             hidden_channels = hidden_channels,
             out_channels =  self.num_classes,
             num_layers = num_layers,
+            use_batch_norm = constants.use_batch_norm
         ).to(self.device)
 
         self.metadata["gnn"]["desc"] = "classic_gcn"

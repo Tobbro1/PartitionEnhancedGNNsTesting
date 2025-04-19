@@ -50,6 +50,8 @@ class Experiment_Manager():
 
         self.h = None # Used for h-Prox datasets
 
+        self.max_patience = float('inf')
+
         # lists of values of hyperparameters for grid search
         self.k = []
         self.r = []
@@ -87,7 +89,7 @@ class Experiment_Manager():
     # dataset_str: one of 'CSL' or h-Prox for any integer h from [1,3,5,8,10]
     def setup_experiments(self, dataset_str: str, base_model: str = 'gin', k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
                           num_clusters: List[int] = None, lsa_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
-                          hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None):
+                          hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, run_classical_exp = False, max_patience: Optional[int] = None):
 
         self.gnn = GNN_Manager()
 
@@ -106,6 +108,9 @@ class Experiment_Manager():
         self.lrs = lrs
         self.normalize_features = normalize_features
 
+        if max_patience is not None:
+            self.max_patience = max_patience
+
         if base_model == 'gin':
             # Set up the functions to generate GNNs
             self.load_classic_gnn = self.gnn.generate_classic_GIN_model
@@ -120,24 +125,156 @@ class Experiment_Manager():
 
         if dataset_str == 'ogbg-ppa':
             self.dataset_path = osp.join('data', 'OGB', 'PPA')
-            self.run_experiments = self.run_ogb_experiments
+            if run_classical_exp:
+                self.run_experiments = self.run_classical_ogb_experiments
+            else:
+                self.run_experiments = self.run_ogb_experiments
             self.criterion = torch.nn.CrossEntropyLoss(reduction = 'mean')
         elif dataset_str == 'ogbg-molhiv':
             self.dataset_path = osp.join('data', 'OGB', 'MOL_HIV')
-            self.run_experiments = self.run_ogb_experiments
+            if run_classical_exp:
+                self.run_experiments = self.run_classical_ogb_experiments
+            else:
+                self.run_experiments = self.run_ogb_experiments
             self.criterion = torch.nn.BCEWithLogitsLoss()
         elif dataset_str == 'CSL':
             self.dataset_path = osp.join('data', 'CSL', 'CSL_dataset')
-            self.run_experiments = self.run_csl_prox_experiments
+            if run_classical_exp:
+                self.run_experiments = self.run_classical_csl_prox_experiments
+            else:
+                self.run_experiments = self.run_csl_prox_experiments
         elif dataset_str.endswith('-Prox'):
             self.h = int(dataset_str[0])
             assert self.h in [1,3,5,8,10]
             self.dataset_path = osp.join('data', 'Proximity', f'{self.h}-Prox')
-            self.run_experiments = self.run_csl_prox_experiments
+            if run_classical_exp:
+                self.run_experiments = self.run_classical_csl_prox_experiments
+            else:
+                self.run_experiments = self.run_csl_prox_experiments
         else:
             raise ValueError('Invalid dataset string')
 
         print('---   Experiment setup complete   ---')
+
+    def run_classical_ogb_experiments(self):
+        t0 = time.time()
+
+        print(f'---   Starting experiments on {self.dataset_str}   ---')
+
+        data = {}
+        data["dataset"] = self.dataset_str
+        if self.dataset_str == 'ogbg-molhiv':
+            data["loss_func"] = "BCE_with_logits_loss"
+            data["metric"] = "rocauc"
+        elif self.dataset_str == 'ogbg-ppa':
+            data["loss_func"] = "cross_entropy"
+            data["metric"] = "acc"
+        data["overall_time"] = -1.0
+        data["res"] = {}
+
+        print('---   Optimizing classical GNN hyperparameters   ---')
+        hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = True)
+
+        val_perfs = torch.tensor(best_val_perfs)
+        test_perfs = torch.tensor(best_test_perfs)
+        val_mean = val_perfs.mean().item()
+        if val_perfs.size()[0] == 1:
+            val_std = 0.0
+        else:
+            val_std = val_perfs.std().item()
+        test_perfs = torch.tensor(best_test_perfs)
+        test_mean = test_perfs.mean().item()
+        if test_perfs.size()[0] == 1:
+            test_std = 0.0
+        else:
+            test_std = test_perfs.std().item()
+
+        data["classic_gnn_hyperparameter_opt"] = hyperparameter_opt_data
+
+        data["classic_gnn_hyperparameter_opt"]["res"]["val_perf"]["mean"] = val_mean
+        data["classic_gnn_hyperparameter_opt"]["res"]["val_perf"]["std"] = val_std
+
+        data["classic_gnn_hyperparameter_opt"]["res"]["test_perf"]["mean"] = test_mean
+        data["classic_gnn_hyperparameter_opt"]["res"]["test_perf"]["std"] = test_std
+
+        data["res"]["hyperparameter"] = {}
+        data["res"]["hyperparameter"]["best_num_layers"] = best_classic_n_layers
+        data["res"]["hyperparameter"]["best_num_hidden_channels"] = best_classic_n_hidden_channels
+        data["res"]["hyperparameter"]["best_batch_size"] = best_classic_s_batch
+        data["res"]["hyperparameter"]["best_num_epochs"] = best_classic_n_epoch
+        data["res"]["hyperparameter"]["best_lr"] = best_classic_lr
+
+        print(f'---   Val perf: mean: {val_mean}; std: {val_std}   ---')
+        print(f'---   Test perf: mean: {test_mean}; std: {test_std}   ---')
+
+        print('---   Optimizing classical GNN hyperparameters complete   ---')
+
+        data["overall_time"] = time.time() - t0
+
+        self.data.update(data)
+
+    def run_classical_csl_prox_experiments(self):
+        t0 = time.time()
+
+        print(f'---   Starting experiments on {self.dataset_str}   ---')
+
+        data = {}
+        data["dataset"] = self.dataset_str
+        data["loss_func"] = "cross_entropy"
+        data["metric"] = "acc"
+        data["overall_time"] = -1.0
+        data["res"] = {}
+
+        loss_func = F.cross_entropy
+
+        if self.dataset_str == 'CSL':
+            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+        elif self.dataset_str.endswith('-Prox'):
+            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+
+        splits = dataset.gen_data_splits()
+
+        # Optimize GNN hyperparameters without clustering first
+        print('---   Optimizing classical GNN hyperparameters   ---')
+        hyperparameter_opt_data, best_val_accs, best_test_accs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = True)
+
+        val_accs = torch.tensor(best_val_accs)
+        test_accs = torch.tensor(best_test_accs)
+        val_mean = val_accs.mean().item()
+        if val_accs.size()[0] == 1:
+            val_std = 0.0
+        else:
+            val_std = val_accs.std().item()
+        test_mean = test_accs.mean().item()
+        if test_accs.size()[0] == 1:
+            test_std = 0.0
+        else:
+            test_std = test_accs.std().item()
+
+        data["classic_gnn_hyperparameter_opt"] = hyperparameter_opt_data
+
+        data["classic_gnn_hyperparameter_opt"]["res"]["val_acc"]["mean"] = val_mean
+        data["classic_gnn_hyperparameter_opt"]["res"]["val_acc"]["std"] = val_std
+
+        data["classic_gnn_hyperparameter_opt"]["res"]["test_acc"]["mean"] = test_mean
+        data["classic_gnn_hyperparameter_opt"]["res"]["test_acc"]["std"] = test_std
+
+        data["res"]["hyperparameter"] = {}
+
+        data["res"]["hyperparameter"]["best_num_layers"] = best_classic_n_layers
+        data["res"]["hyperparameter"]["best_num_hidden_channels"] = best_classic_n_hidden_channels
+        data["res"]["hyperparameter"]["best_batch_size"] = best_classic_s_batch
+        data["res"]["hyperparameter"]["best_num_epochs"] = best_classic_n_epoch
+        data["res"]["hyperparameter"]["best_lr"] = best_classic_lr
+
+        print(f'---   Val acc: mean: {val_mean}; std: {val_std}   ---')
+        print(f'---   Test acc: mean: {test_mean}; std: {test_std}   ---')
+
+        print('---   Optimizing classical GNN hyperparameters complete   ---')
+
+        data["overall_time"] = time.time() - t0
+
+        self.data.update(data)
 
     # Schedules multiple experiments
     def run_ogb_experiments(self):
@@ -419,9 +556,9 @@ class Experiment_Manager():
                                 self.gnn.model.reset_parameters()
 
                                 # We shuffle the training data for training
-                                train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True)
-                                val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False)
-                                test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False)
+                                train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True, num_workers = constants.num_workers)
+                                val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
+                                test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
 
                                 best_rerun_val_perf = -1.0
                                 best_rerun_test_perf = -1.0
@@ -429,7 +566,14 @@ class Experiment_Manager():
 
                                 avg_epoch_time = 0.0
 
+                                epoch_patience = 0
+                                stop = False
+                                total_num_epoch = 0
+
                                 for epoch in range(n_epoch):
+                                    if stop:
+                                        break
+
                                     t0 = time.time()
 
                                     rerun_data[cur_rerun]["epoch"][epoch] = {}
@@ -448,12 +592,19 @@ class Experiment_Manager():
                                         best_rerun_val_perf = val_perf
                                         best_rerun_val_epoch = epoch
                                         best_rerun_test_perf = test_perf
+                                        epoch_patience = 0
+                                    else:
+                                        epoch_patience += 1
+                                        if epoch_patience >= self.max_patience:
+                                            stop = True
+                                    
+                                    total_num_epoch += 1
 
                                     time_epoch = time.time() - t0
                                     rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
                                     avg_epoch_time += time_epoch
                                 
-                                avg_epoch_time /= n_epoch
+                                avg_epoch_time /= total_num_epoch
                                 avg_rerun_epoch_time += avg_epoch_time
 
                                 rerun_data[cur_rerun]["best_val_perf"] = best_rerun_val_perf
@@ -689,9 +840,9 @@ class Experiment_Manager():
                             self.gnn.model.reset_parameters()
 
                             # We shuffle the training data for training
-                            train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True)
-                            val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False)
-                            test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False)
+                            train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True, num_workers = constants.num_workers)
+                            val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
+                            test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
 
                             best_rerun_val_perf = -1.0
                             best_rerun_test_perf = -1.0
@@ -699,7 +850,17 @@ class Experiment_Manager():
 
                             avg_epoch_time = 0.0
 
+                            patience = 0
+
+                            stop = False
+
+                            total_num_epoch = 0
+
                             for epoch in range(n_epoch):
+
+                                if stop:
+                                    break
+
                                 t0 = time.time()
 
                                 rerun_data[cur_rerun]["epoch"][epoch] = {}
@@ -718,12 +879,18 @@ class Experiment_Manager():
                                     best_rerun_val_perf = val_perf
                                     best_rerun_val_epoch = epoch
                                     best_rerun_test_perf = test_perf
+                                    patience = 0
+                                else:
+                                    patience += 1
+                                    if patience >= self.max_patience:
+                                        stop = True
 
+                                total_num_epoch += 1
                                 time_epoch = time.time() - t0
                                 rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
                                 avg_epoch_time += time_epoch
                             
-                            avg_epoch_time /= n_epoch
+                            avg_epoch_time /= total_num_epoch
                             avg_rerun_epoch_time += avg_epoch_time
 
                             rerun_data[cur_rerun]["best_val_perf"] = best_rerun_val_perf
@@ -1167,16 +1334,24 @@ class Experiment_Manager():
             self.gnn.model.reset_parameters()
 
             # We shuffle the training data for training
-            train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True)
-            val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False)
-            test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False)
+            train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True, num_workers = constants.num_workers)
+            val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
+            test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
 
             best_val_loss = float("inf")
             best_val_acc = 0.0
             best_val_epoch = 0
             avg_time_epoch = 0.0
             test_acc = -1.0
+
+            stop = False
+            total_num_epoch = 0
+            patience = 0
+
             for epoch in range(n_epoch):
+                if stop:
+                    break
+
                 t0 = time.time()
 
                 rerun_data[cur_rerun]["epoch"][epoch] = {}
@@ -1192,12 +1367,19 @@ class Experiment_Manager():
                     best_val_acc = self.test(gnn = self.gnn, loader = val_loader)
                     best_val_epoch = epoch
                     test_acc = self.test(gnn = self.gnn, loader = test_loader)
+                    patience = 0
+                else:
+                    patience += 1
+                    if patience >= self.max_patience:
+                        stop = True
+                
+                total_num_epoch += 1
 
                 time_epoch = time.time() - t0
                 rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
                 avg_time_epoch += time_epoch
             
-            avg_time_epoch /= n_epoch
+            avg_time_epoch /= total_num_epoch
             avg_time_epoch_overall += avg_time_epoch
             avg_test_acc += test_acc
 

@@ -1,6 +1,6 @@
 #general imports
 import multiprocessing.shared_memory
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import os
 import os.path as osp
 import time
@@ -8,6 +8,8 @@ import json #to implement saving and loading the properties of datasets without 
 import tqdm
 from enum import Enum
 import atexit
+
+from copy import deepcopy
 
 #parallelization
 import multiprocessing
@@ -43,14 +45,12 @@ class Feature_Generator():
 
     # NOTE: dataset._data.x must NOT be set to None to ensure proper function and num_features must be at least 1. In the unlabeled case, x should simply be set to the constant 0 vector.
     # samples defines the indices of the vertices in the dataset that should be considered.
-    def __init__(self, dataset: Dataset, node_pred: bool, samples: Optional[List[int]] | Optional[Tensor], absolute_path_prefix: str, dataset_write_path: str, dataset_write_filename: str, dataset_desc: str, use_editmask: bool, result_mmap_dest: str, editmask_mmap_dest: str, split_desc: Optional[str] = None, properties_path: Optional[str] = None, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None, idx_lookup_path: Optional[str] = None, write_idx_lookup_path: Optional[str] = None, write_idx_lookup_filename: Optional[str] = None):
+    def __init__(self, dataset: Dataset, node_pred: bool, samples: Optional[List[int]] | Optional[Tensor], absolute_path_prefix: str, dataset_write_path: str, dataset_desc: str, use_editmask: bool, result_mmap_dest: str, editmask_mmap_dest: str, split_desc: Optional[str] = None, properties_path: Optional[str] = None, write_properties_root_path: Optional[str] = None, write_properties_filename: Optional[str] = None, idx_lookup_path: Optional[str] = None, write_idx_lookup_path: Optional[str] = None, write_idx_lookup_filename: Optional[str] = None):
         super().__init__()
 
         self.dataset = dataset
         self.absolute_path_prefix = absolute_path_prefix
         self.dataset_path = dataset_write_path
-        self.dataset_filename = f'{dataset_write_filename}.svmlight'
-        self.editmask_filename = f'{dataset_write_filename}_editmask.svmlight'
 
         self.dataset_desc = dataset_desc
         self.use_editmask = use_editmask
@@ -199,10 +199,14 @@ class Feature_Generator():
     # twoWL is necessary in case of computing 2WL features as the processes cannot return finished feature vectors since these would be inconsistent across processes, thus the parent process needs to do some additional processing.
     # NOTE: specifying a chunksize greater than 1 might increase the lag (esp of the progress bar) but often times yields a much faster computation speed and is highly advised
     # NOTE: In graph mode, the vector_buffer_size has to be larger than the largest graph
-    def generate_features(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, metadata_path: Optional[str] = None, metadata_filename: Optional[str] = None, time_summary_path: str = "", time_summary_filename: Optional[str] = None, graph_mode: bool = False):
+    def generate_features(self, write_filename: str, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, metadata_path: Optional[str] = None, metadata_filename: Optional[str] = None, time_summary_path: str = "", time_summary_filename: Optional[str] = None, graph_mode: bool = False):
 
         assert num_processes > 0
         assert self.samples is not None and len(self.samples) > 0
+
+        dataset_filename = f'{write_filename}.svmlight'
+        editmask_filename = f'{write_filename}_editmask.svmlight'
+
 
         # We cannot schedule via graphs if there is only one graph available
         if self.node_pred:
@@ -373,7 +377,7 @@ class Feature_Generator():
         else:
             comment = self.title_str + f"\n"
         
-        self.save_features(comment)
+        self.save_features(comment = comment, dataset_filename = dataset_filename, editmask_filename = editmask_filename)
 
         if log_times:
             time_summary_path = osp.join(self.absolute_path_prefix, time_summary_path)
@@ -476,21 +480,21 @@ class Feature_Generator():
 
     #NOTE: This function must only be called after joining parallelized processes to ensure correct function
     # Implements a simple cropping of the feature vectors 
-    def save_features(self, comment: Optional[str], use_mmap: bool = True, result_database: Optional[np.array] = None):
+    def save_features(self, comment: Optional[str], dataset_filename: str, editmask_filename: str, use_mmap: bool = True, result_database: Optional[np.array] = None):
         t0 = time.time()
 
-        rel_dataset_path = osp.join(self.dataset_path, self.dataset_filename)
+        rel_dataset_path = osp.join(self.dataset_path, dataset_filename)
 
         dataset_path = osp.join(self.absolute_path_prefix, self.dataset_path)
         if not osp.exists(dataset_path):
             os.makedirs(dataset_path)
 
-        dataset_path = osp.join(dataset_path, self.dataset_filename)
+        dataset_path = osp.join(dataset_path, dataset_filename)
         if not osp.exists(dataset_path):
             open(dataset_path, 'w').close()
         
         if self.use_editmask:
-            editmask_path = osp.join(self.dataset_path, self.editmask_filename)
+            editmask_path = osp.join(self.dataset_path, editmask_filename)
             path = osp.join(self.absolute_path_prefix, editmask_path)
             if not osp.exists(path):
                 open(path, 'w').close()
@@ -530,6 +534,9 @@ class Feature_Generator():
 
         write_time = time.time() - t0
         self.metadata["times"]["write_on_disk"] = write_time
+
+    def get_metadata(self) -> Dict:
+        return deepcopy(self.metadata)
 
     # Helper to evaluate time complexity of individual operations
     def log_time(self, event: TimeLoggingEvent, value: float):

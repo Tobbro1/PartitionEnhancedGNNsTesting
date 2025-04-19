@@ -18,12 +18,15 @@ import torch_geometric.utils
 #import for the r_s_ring_subgraph implementation
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
+import constants
+
 # Helper to initialize random seeds for reproducability
 def initialize_random_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    constants.random_generator = np.random.default_rng(seed)
 
 # Adaptation of the torch_geometric.utils.k_hop_subgraph method for r-s-Rings
 # NOTE: this implementation only works for undirected graphs unlike the initial implementation of k_hop_subgraph

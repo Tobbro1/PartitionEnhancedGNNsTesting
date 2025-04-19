@@ -99,7 +99,7 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
             # Add the cluster_ids to the finished dataset
             dataset._data.x = torch.cat((cluster_ids.view(-1,1), dataset._data.x.view(-1, dataset.num_features)), dim = 1)
 
-            # Delete cache
+            # Delete cache since iterating over the graphs is too time consuming and the cache is rebuilt in the first training iteration
             dataset._data_list = None
 
     else:

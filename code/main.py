@@ -2,9 +2,11 @@ import os.path as osp
 import numpy as np
 import os
 from typing import Dict, List
+from pathlib import Path
 
 import util
 import constants
+import argparse
 
 import torch
 
@@ -21,10 +23,14 @@ def gen_experiment_config_file(root_path: str) -> None:
 
     config = {}
     config["type"] = "experiment"
+    config["mode"] = "---   'classical' or 'enhanced' depending on whether a classical or an enhanced gnn should be trained   ---"
     config["title"] = "---   filename of the result (without extension)   ---"
     config["general"] = {}
     config["general"]["seed"] = constants.SEED
+    config["general"]["num_workers"] = constants.num_workers
     config["general"]["num_reruns"] = constants.num_reruns
+    config["general"]["max_patience"] = constants.max_patience
+    config["general"]["use_batch_norm"] = constants.use_batch_norm
     config["general"]["num_k_fold"] = constants.num_k_fold
     config["general"]["k_fold_test_ratio"] = constants.k_fold_test_ratio
     config["general"]["mbk_batch_size"] = constants.mbk_batch_size
@@ -76,11 +82,22 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     normalize = False
     dataset_str = ''
     base_model = ''
+    run_classical_exp = False
 
-    config["general"]["mbk_batch_size"] = constants.mbk_batch_size
-    config["general"]["mbk_num_init"] = constants.mbk_n_init
-    config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
-    config["general"]["mbk_max_iter"] = constants.mbk_max_iter
+    # config["general"]["mbk_batch_size"] = constants.mbk_batch_size
+    # config["general"]["mbk_num_init"] = constants.mbk_n_init
+    # config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
+    # config["general"]["mbk_max_iter"] = constants.mbk_max_iter
+
+    if "mode" in config:
+        val = config["mode"]
+        assert isinstance(val, str)
+        if val == "classical":
+            run_classical_exp = True
+        elif val == "enhanced":
+            run_classical_exp = False
+        else:
+            raise ValueError('Invalid mode specified in config')
 
     # Parse config
     for key, value in config["general"].items():
@@ -88,10 +105,21 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
             assert isinstance(value, int)
             assert value >= 0
             constants.SEED = value
+        elif key == "num_workers":
+            assert isinstance(value, int)
+            assert value >= 0
+            constants.num_workers = value
         elif key == "num_reruns":
             assert isinstance(value, int)
             assert value > 0
             constants.num_reruns = value
+        elif key == "max_patience":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.max_patience = value
+        elif key == "use_batch_norm":
+            assert isinstance(value, bool)
+            constants.use_batch_norm = value
         elif key == "num_k_fold":
             assert isinstance(value, int)
             assert value > 0
@@ -218,7 +246,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     try:
         manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
                                     lsa_dims = lsa_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
-                                    num_epochs = num_epochs, lrs = lrs, normalize_features = normalize)
+                                    num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, run_classical_exp = run_classical_exp, max_patience = constants.max_patience)
         
         manager.run_experiments()
 
@@ -250,12 +278,21 @@ def gen_feature_gen_config_file(root_path: str) -> None:
     config["general"]["graph_chunksize"] = constants.graph_chunksize
     config["general"]["vertex_chunksize"] = constants.vertex_chunksize
     config["general"]["vector_buffer_size"] = constants.vector_buffer_size
+    config["general"]["num_lo_gen"] = constants.num_lo_gens
     config["dataset"] = {}
     config["dataset"]["dataset_str"] = "---   'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
-    config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
-    config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
-    config["dataset"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
-    config["dataset"]["gen_vertex_sp_features"] = False
+    config["dataset"]["sp"] = {}
+    config["dataset"]["sp"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
+    config["dataset"]["sp"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["sp"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["sp"]["gen_vertex_sp_features"] = False
+    config["dataset"]["lo"] = {}
+    config["dataset"]["lo"]["size_smallest_subgraph"] = "---   Size of the smallest subgraph that should be considered when computing the Lovasz feature   ---"
+    config["dataset"]["lo"]["size_largest_subgraph"] = "---   Size of the largest subgraph that should be considered when computing the Lovasz feature   ---"
+    config["dataset"]["lo"]["num_subgraph_samples"] = "---   Number of subgraphs that should be considered when computing the Lovasz feature   ---"
+    config["dataset"]["lo"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
+    config["dataset"]["lo"]["sp"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["lo"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
     config["dataset"]["re_gen_properties"] = True
 
     util.write_metadata_file(path = path, filename = filename, data = config)
@@ -269,9 +306,14 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
     assert "dataset" in config
 
     h = None
-    k = None
-    r = None
-    s = None
+    sp_k = None
+    sp_r = None
+    sp_s = None
+    lo_k = None
+    lo_r = None
+    lo_s = None
+    lo_graph_sizes_range = tuple([-1,-1])
+    lo_num_samples = None
     gen_vertex_sp_features = False
     re_gen_properties = True
     dataset_str = ''
@@ -298,6 +340,10 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
             assert isinstance(value, int)
             assert value > 0
             constants.vector_buffer_size = value
+        elif key == "num_lo_gen":
+            assert isinstance(value, int)
+            assert value > 0
+            constants.num_lo_gens = value
         else:
             raise ValueError(f'Invalid key {key} in config["general"]')
 
@@ -317,27 +363,65 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
                 dataset_str = value
             else:
                 raise ValueError(f'Invalid dataset_str: {value}')
-        elif key == "k":
-            if len(value) > 0:
-                assert [x > 0 for x in value]
-                k = value
-        elif key == "r":
-            if len(value) > 0:
-                assert [x > 0 for x in value]
-                if s is not None and len(s) > 0 and len(s) == len(value):
-                    for idx in range(len(s)):
-                        assert s[idx] >= value[idx]
-                r = value
-        elif key == "s":
-            if len(value) > 0:
-                assert [x > 0 for x in value]
-                if r is not None and len(r) > 0 and len(r) == len(value):
-                    for idx in range(len(r)):
-                        assert r[idx] <= value[idx]
-                s = value
-        elif key == "gen_vertex_sp_features":
-            assert isinstance(value, bool)
-            gen_vertex_sp_features = value
+        elif key == "sp":
+            for k, v in value.items():
+                if k == "k":
+                    if len(v) > 0:
+                        assert [x > 0 for x in v]
+                        sp_k = v
+                elif k == "r":
+                    if len(v) > 0:
+                        assert [x > 0 for x in v]
+                        if sp_s is not None and len(sp_s) > 0 and len(sp_s) == len(v):
+                            for idx in range(len(sp_s)):
+                                assert sp_s[idx] >= v[idx]
+                        sp_r = value
+                elif k == "s":
+                    if len(v) > 0:
+                        assert [x > 0 for x in v]
+                        if sp_r is not None and len(sp_r) > 0 and len(sp_r) == len(v):
+                            for idx in range(len(sp_r)):
+                                assert sp_r[idx] <= v[idx]
+                        sp_s = v
+                elif k == "gen_vertex_sp_features":
+                    assert isinstance(v, bool)
+                    gen_vertex_sp_features = v
+        elif key == "lo":
+            for k, v in value.items():
+                if k == "size_smallest_subgraph":
+                    assert isinstance(v, int)
+                    assert v > 0
+                    if lo_graph_sizes_range[1] != -1:
+                        assert v <= lo_graph_sizes_range[1]
+                    lo_graph_sizes_range[0] = v
+                elif k == "size_largest_subgraph":
+                    assert isinstance(v, int)
+                    assert v > 0
+                    if lo_graph_sizes_range[0] != -1:
+                        assert v >= lo_graph_sizes_range[0]
+                    lo_graph_sizes_range[1] = v
+                elif k == "num_subgraph_samples":
+                    assert isinstance(v, int)
+                    assert v > 0
+                    lo_num_samples = v
+                if k == "k":
+                    if len(v) > 0:
+                        assert [x > 0 for x in v]
+                        lo_k = v
+                elif k == "r":
+                    if len(v) > 0:
+                        assert [x > 0 for x in v]
+                        if lo_s is not None and len(lo_s) > 0 and len(lo_s) == len(v):
+                            for idx in range(len(lo_s)):
+                                assert lo_s[idx] >= v[idx]
+                        lo_r = value
+                elif k == "s":
+                    if len(v) > 0:
+                        assert [x > 0 for x in v]
+                        if lo_r is not None and len(lo_r) > 0 and len(lo_r) == len(v):
+                            for idx in range(len(lo_r)):
+                                assert lo_r[idx] <= v[idx]
+                        lo_s = v
         elif key == "re_gen_properties":
             assert isinstance(value, bool)
             re_gen_properties = value
@@ -345,23 +429,27 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
             raise ValueError(f'Invalid key {key} in config["dataset"]')
         
     assert dataset_str is not None
-    assert (k is not None and len(k) > 0) or (r is not None and s is not None and len(r) > 0) or gen_vertex_sp_features
-    if r is not None:
-        assert s is not None
-    if s is not None:
-        assert r is not None
+    assert (sp_k is not None and len(sp_k) > 0) or (sp_r is not None and sp_s is not None and len(sp_r) > 0) or (lo_k is not None and len(lo_k) > 0) or (lo_r is not None and lo_s is not None and len(lo_r) > 0) or gen_vertex_sp_features
+    if sp_r is not None:
+        assert sp_s is not None
+    if sp_s is not None:
+        assert sp_r is not None
+    if lo_r is not None:
+        assert lo_s is not None
+    if lo_s is not None:
+        assert lo_r is not None
 
     util.initialize_random_seeds(constants.SEED)
 
     try:
         if dataset_str == 'ogbg-molhiv':
-            run_molhiv(k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+            run_molhiv(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
         elif dataset_str == 'ogbg-ppa':
-            run_ppa(k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+            run_ppa(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
         elif dataset_str == 'CSL':
-            run_csl(k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+            run_csl(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
         elif dataset_str.endswith('-Prox'):
-            run_proximity(h_vals = [h], k_vals = k, r_vals = r, s_vals = s, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+            run_proximity(h_vals = [h], sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
         else:
             raise ValueError('datasetstr')
     except Exception as e:
@@ -393,50 +481,67 @@ def shorten_experiment_res_file(root_path: str, filename: str):
 
     util.write_metadata_file(path = root_path, filename = f'{filename}_short.json', data = data)
 
+
 if __name__ == '__main__':
     # test gnn util
 
-    mode = 1
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-g', '--generate', help = 'generate example files for configs', action = 'store_true')
+    group.add_argument('-f', '--file', nargs = '?', help = 'specify path to a config file that will be executed', type = Path)
+    group.add_argument('-d', '--directory', nargs = '?', help = 'specify path to a directory which will be scanned for config files which will be executed consecutively', type = Path)
+    parser.add_argument('-r', '--root_path', nargs = '?', help = 'specify the root directory, if not set will default to the parent directory of the main.py file', type = Path, default = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir))
 
-    root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
+    args = parser.parse_args()
 
-    configs_path = osp.join(root_path, 'experiments', 'configs')
+    # Required for pytorch version >= 2.6.0 since torch.load weights_only default value was changed from 'False' to 'True'
+    torch.serialization.add_safe_globals([DataEdgeAttr, DataTensorAttr, GlobalStorage])
 
-    if mode == 0:
-        gen_experiment_config_file(root_path = root_path)
-        gen_feature_gen_config_file(root_path = root_path)
-    elif mode == 1:
-        dirlist = os.listdir(path = configs_path)
+    if args.generate:
+        # generate config files
+        gen_experiment_config_file(root_path = args.root_path)
+        gen_feature_gen_config_file(root_path = args.root_path)
+    elif args.file is not None:
+        # execute the file
+        config = util.read_metadata_file(path = args.file)
+        if "type" in config:
+            if config["type"] == "experiment":
+                # Run experiment
+                run_experiment(config, root_path = args.root_path, experiment_idx = 0)
+            elif config["type"] == "feature_gen":
+                # Generate features
+                run_feature_gen(config = config, root_path = args.root_path)
+        else:
+            raise ValueError('Invalid config - no type property')
+    elif args.directory is not None:
+        dirlist = os.listdir(path = args.directory)
 
         # We need to backup the experiment configs since we need to execute feature generations first
         experiment_configs = []
 
-        # Required for pytorch version >= 2.6.0 since torch.load weights_only default value was changed from 'False' to 'True'
-        torch.serialization.add_safe_globals([DataEdgeAttr, DataTensorAttr, GlobalStorage])
-
         for path in dirlist:
             if path.endswith('.json'):
                 try:
-                    config = util.read_metadata_file(path = osp.join(configs_path, path))
+                    config = util.read_metadata_file(path = osp.join(args.directory, path))
                     if "type" in config:
                         if config["type"] == "experiment":
                             # Run experiment
                             experiment_configs.append(config)
                         elif config["type"] == "feature_gen":
                             # Generate features
-                            run_feature_gen(config = config, root_path = root_path)
+                            run_feature_gen(config = config, root_path = args.root_path)
                 except Exception as e:
                     print(repr(e))
             
         # Run all experiments
         for idx, experiment_config in enumerate(experiment_configs):
             try:
-                run_experiment(config = experiment_config, root_path = root_path, experiment_idx = idx)
+                run_experiment(config = experiment_config, root_path = args.root_path, experiment_idx = idx)
             except Exception as e:
                 print(repr(e))
 
-    elif mode == 2:
-        path = osp.join(root_path, 'experiments', 'results')
-        filename = 'experiment_1_vertex_sp_gin'
+    # elif mode == 2:
+    #     path = osp.join(root_path, 'experiments', 'results')
+    #     filename = 'experiment_1_vertex_sp_gin'
 
-        shorten_experiment_res_file(root_path = path, filename = filename)
+    #     shorten_experiment_res_file(root_path = path, filename = filename)
