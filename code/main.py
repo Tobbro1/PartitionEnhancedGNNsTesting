@@ -40,6 +40,8 @@ def gen_experiment_config_file(root_path: str) -> None:
     config["dataset"] = {}
     config["dataset"]["dataset_str"] = "---   'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
+    config["dataset"]["feature_type"] = "---   'sp' or 'lo', only utilised for k-disks or r-s-rings   ---"
+    config["dataset"]["lo_feature_idx"] = "---   Index of the Lovasz features that should be utilised, use '0' if only one feature has been generated. Ignored if feature_type is not 'lo'   ---"
     config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
     config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
     config["dataset"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
@@ -83,6 +85,8 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     dataset_str = ''
     base_model = ''
     run_classical_exp = False
+    is_lovasz_feature = False
+    lo_idx_str = ""
 
     # config["general"]["mbk_batch_size"] = constants.mbk_batch_size
     # config["general"]["mbk_num_init"] = constants.mbk_n_init
@@ -163,6 +167,18 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
                 dataset_str = value
             else:
                 raise ValueError(f'Invalid dataset_str: {value}')
+        elif key == "feature_type":
+            assert isinstance(value, str)
+            if value == "sp":
+                is_lovasz_feature = False
+            elif value == "lo":
+                is_lovasz_feature = True
+        elif key == "lo_feature_idx":
+            assert isinstance(value, int)
+            if value > 0:
+                lo_idx_str = f"_{value}"
+            else:
+                lo_idx_str = ""
         elif key == "k":
             if len(value) > 0:
                 assert [x > 0 for x in value]
@@ -244,9 +260,9 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     manager = Experiment_Manager(root_path = root_path)
 
     try:
-        manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
+        manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
                                     lsa_dims = lsa_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
-                                    num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, run_classical_exp = run_classical_exp, max_patience = constants.max_patience)
+                                    num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, run_classical_exp = run_classical_exp, max_patience = constants.max_patience, lo_idx_str = lo_idx_str)
         
         manager.run_experiments()
 
@@ -255,7 +271,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         else:
             filename = f'experiment_{experiment_idx}_result.json'
 
-        util.write_metadata_file(data = manager.data, path = path, filename = filename)
+        util.write_metadata_file(data = manager.get_metadata(), path = path, filename = filename)
 
     except Exception as e:
         if "title" in config and isinstance(config["title"], str) and len(config["title"]) > 0:
@@ -291,7 +307,7 @@ def gen_feature_gen_config_file(root_path: str) -> None:
     config["dataset"]["lo"]["size_largest_subgraph"] = "---   Size of the largest subgraph that should be considered when computing the Lovasz feature   ---"
     config["dataset"]["lo"]["num_subgraph_samples"] = "---   Number of subgraphs that should be considered when computing the Lovasz feature   ---"
     config["dataset"]["lo"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
-    config["dataset"]["lo"]["sp"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+    config["dataset"]["lo"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
     config["dataset"]["lo"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
     config["dataset"]["re_gen_properties"] = True
 
@@ -312,7 +328,7 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
     lo_k = None
     lo_r = None
     lo_s = None
-    lo_graph_sizes_range = tuple([-1,-1])
+    lo_graph_sizes_range = [-1,-1]
     lo_num_samples = None
     gen_vertex_sp_features = False
     re_gen_properties = True
@@ -375,7 +391,7 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
                         if sp_s is not None and len(sp_s) > 0 and len(sp_s) == len(v):
                             for idx in range(len(sp_s)):
                                 assert sp_s[idx] >= v[idx]
-                        sp_r = value
+                        sp_r = v
                 elif k == "s":
                     if len(v) > 0:
                         assert [x > 0 for x in v]
@@ -414,7 +430,7 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
                         if lo_s is not None and len(lo_s) > 0 and len(lo_s) == len(v):
                             for idx in range(len(lo_s)):
                                 assert lo_s[idx] >= v[idx]
-                        lo_r = value
+                        lo_r = v
                 elif k == "s":
                     if len(v) > 0:
                         assert [x > 0 for x in v]
@@ -427,7 +443,9 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
             re_gen_properties = value
         else:
             raise ValueError(f'Invalid key {key} in config["dataset"]')
-        
+    
+    lo_graph_sizes_range = tuple(lo_graph_sizes_range)
+
     assert dataset_str is not None
     assert (sp_k is not None and len(sp_k) > 0) or (sp_r is not None and sp_s is not None and len(sp_r) > 0) or (lo_k is not None and len(lo_k) > 0) or (lo_r is not None and lo_s is not None and len(lo_r) > 0) or gen_vertex_sp_features
     if sp_r is not None:
@@ -441,19 +459,31 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
 
     util.initialize_random_seeds(constants.SEED)
 
-    try:
-        if dataset_str == 'ogbg-molhiv':
-            run_molhiv(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
-        elif dataset_str == 'ogbg-ppa':
-            run_ppa(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
-        elif dataset_str == 'CSL':
-            run_csl(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
-        elif dataset_str.endswith('-Prox'):
-            run_proximity(h_vals = [h], sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
-        else:
-            raise ValueError('datasetstr')
-    except Exception as e:
-        print(repr(e))
+    if dataset_str == 'ogbg-molhiv':
+        run_molhiv(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    elif dataset_str == 'ogbg-ppa':
+        run_ppa(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    elif dataset_str == 'CSL':
+        run_csl(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    elif dataset_str.endswith('-Prox'):
+        run_proximity(h_vals = [h], sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    else:
+        raise ValueError('datasetstr')
+
+
+    # try:
+    #     if dataset_str == 'ogbg-molhiv':
+    #         run_molhiv(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    #     elif dataset_str == 'ogbg-ppa':
+    #         run_ppa(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    #     elif dataset_str == 'CSL':
+    #         run_csl(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    #     elif dataset_str.endswith('-Prox'):
+    #         run_proximity(h_vals = [h], sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    #     else:
+    #         raise ValueError('datasetstr')
+    # except Exception as e:
+    #     print(repr(e))
 
 def shorten_experiment_res_file(root_path: str, filename: str):
     data = util.read_metadata_file(path = osp.join(root_path, f'{filename}.json'))

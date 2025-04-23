@@ -216,8 +216,8 @@ def run_ppa(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]
     num_processes = constants.num_processes
     vector_buffer_size = constants.vector_buffer_size
 
-    result_mmap_path = osp.join(path, 'results.np')
-    editmask_mmap_path = osp.join(path, 'editmask.np')
+    result_mmap_path = osp.join(root_path, path, 'results.np')
+    editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
 
     path = osp.join(path, 'PPA')
 
@@ -250,7 +250,7 @@ def run_ppa(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]
         # Generate Vertex SP features
 
         vertex_sp_path = osp.join(output_path, f'vertex_SP_features')
-        dataset_write_filename = f"OGBG-PPA_vertex_SP_features"
+        dataset_write_filename = f"PPA_vertex_SP_features"
 
         metadata_filename = f'{dataset_write_filename}_metadata.json'
 
@@ -366,8 +366,8 @@ def run_molhiv(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[i
     num_processes = constants.num_processes
     vector_buffer_size = constants.vector_buffer_size
 
-    result_mmap_path = osp.join(path, 'results.np')
-    editmask_mmap_path = osp.join(path, 'editmask.np')
+    result_mmap_path = osp.join(root_path, path, 'results.np')
+    editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
 
     path = osp.join(path, 'MOL_HIV')
 
@@ -401,7 +401,7 @@ def run_molhiv(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[i
         # Generate Vertex SP features
 
         vertex_sp_path = osp.join(output_path, f'vertex_SP_features')
-        dataset_write_filename = f"OGBG-MOL_HIV_vertex_SP_features"
+        dataset_write_filename = f"MOLHIV_vertex_SP_features"
 
         metadata_filename = f'{dataset_write_filename}_metadata.json'
 
@@ -518,8 +518,8 @@ def run_csl(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]
     vector_buffer_size = constants.vector_buffer_size
 
     # Generate features for every h in h_vals
-    result_mmap_path = osp.join(path, 'results.np')
-    editmask_mmap_path = osp.join(path, 'editmask.np')
+    result_mmap_path = osp.join(root_path, path, 'results.np')
+    editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
 
     path = osp.join(path, f'CSL_dataset')
     dataset_csl = CSL_Dataset(root = osp.join(absolute_path_prefix, path))
@@ -572,7 +572,7 @@ def run_csl(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]
             print(f"---   Finished generating CSL {k}-Disk SP features   ---")
 
     if sp_r_vals is not None and sp_s_vals is not None and len(sp_r_vals) > 0 and len(sp_s_vals) == len(sp_r_vals):
-        for idx in range(sp_r_vals):
+        for idx in range(len(sp_r_vals)):
             # Generate r-s-ring SP feature vectors
 
             r = sp_r_vals[idx]
@@ -617,14 +617,14 @@ def run_csl(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]
                 gen.generate_features(write_filename = dataset_write_filename, chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = k_disk_sp_path, metadata_filename = metadata_filename, graph_mode = False)
                 print(f"---   Finished generating CSL {k}-Disk Lovasz features   ---")
 
-    if sp_r_vals is not None and sp_s_vals is not None and len(sp_r_vals) > 0 and len(sp_s_vals) == len(sp_r_vals):
+    if lo_r_vals is not None and lo_s_vals is not None and len(lo_r_vals) > 0 and len(lo_s_vals) == len(lo_r_vals):
         assert lo_graph_sizes_range is not None and lo_graph_sizes_range[0] > 0 and lo_graph_sizes_range[1] > 0 and lo_num_samples is not None
 
-        for idx in range(sp_r_vals):
+        for idx in range(len(lo_r_vals)):
             # Generate r-s-ring SP feature vectors
 
-            r = sp_r_vals[idx]
-            s = sp_s_vals[idx]
+            r = lo_r_vals[idx]
+            s = lo_s_vals[idx]
 
             if s < r:
                 continue
@@ -698,8 +698,8 @@ def run_proximity(h_vals: List[int], sp_k_vals: Optional[List[int]] = None, sp_r
     vector_buffer_size = constants.vector_buffer_size
 
     # Generate features for every h in h_vals
-    result_mmap_path = osp.join(path, 'results.np')
-    editmask_mmap_path = osp.join(path, 'editmask.np')
+    result_mmap_path = osp.join(root_path, path, 'results.np')
+    editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
 
     for h in h_vals:
         path = osp.join(path, f'{h}-Prox')
@@ -732,9 +732,9 @@ def run_proximity(h_vals: List[int], sp_k_vals: Optional[List[int]] = None, sp_r
 
             chunksize = constants.graph_chunksize
 
-            gen = Vertex_SP_Feature_Generator(dataset = dataset_prox, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = vertex_sp_path, dataset_write_filename = dataset_write_filename, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            gen = Vertex_SP_Feature_Generator(dataset = dataset_prox, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = vertex_sp_path, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
             print(f"---   Generating {h}-Prox Vertex SP features   ---")
-            gen.generate_features(chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = vertex_sp_path, metadata_filename = metadata_filename, graph_mode = True)
+            gen.generate_features(write_filename = dataset_write_filename, chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = vertex_sp_path, metadata_filename = metadata_filename, graph_mode = True)
             print(f"---   Finished generating {h}-Prox Vertex SP features   ---")
 
         if sp_k_vals is not None and len(sp_k_vals) > 0:

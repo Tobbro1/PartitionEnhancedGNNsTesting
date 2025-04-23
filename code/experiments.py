@@ -1,6 +1,6 @@
 # Includes the functions to start experiments
 from typing import Optional, Tuple, Dict, List
-from copy import copy
+from copy import deepcopy
 
 import os.path as osp
 import numpy as np
@@ -44,6 +44,8 @@ class Experiment_Manager():
 
         self.criterion = None # used for ogb datasets
         
+        self.is_lovasz_feature = False
+        self.lo_idx_str = ""
         self.normalize_features = False
         
         self.num_reruns = constants.num_reruns
@@ -87,7 +89,7 @@ class Experiment_Manager():
     # Initialize variables, set hyperparameter ranges that need to be evaluated
     # base_model: one of 'gin' or 'gcn'
     # dataset_str: one of 'CSL' or h-Prox for any integer h from [1,3,5,8,10]
-    def setup_experiments(self, dataset_str: str, base_model: str = 'gin', k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
+    def setup_experiments(self, dataset_str: str, base_model: str = 'gin', is_lovasz_feature: bool = False, lo_idx_str: str = "", k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
                           num_clusters: List[int] = None, lsa_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
                           hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, run_classical_exp = False, max_patience: Optional[int] = None):
 
@@ -106,6 +108,8 @@ class Experiment_Manager():
         self.batch_sizes = batch_sizes
         self.num_epochs = num_epochs
         self.lrs = lrs
+        self.is_lovasz_feature = is_lovasz_feature
+        self.lo_idx_str = lo_idx_str
         self.normalize_features = normalize_features
 
         if max_patience is not None:
@@ -153,6 +157,25 @@ class Experiment_Manager():
                 self.run_experiments = self.run_csl_prox_experiments
         else:
             raise ValueError('Invalid dataset string')
+        
+        # add description of the examined data
+        self.data["dataset"] = self.dataset_str
+
+        if self.is_lovasz_feature:
+            datatypestr = "Lovasz"
+        else:
+            datatypestr = "SP"
+        
+        self.data["type"] = [datatypestr]
+
+        # Examine the feature type
+        if self.k is not None and len(self.k) > 0:
+            # use k-disks
+            self.data["type"].append("k-Disk")
+        elif self.r is not None and self.s is not None and len(r) > 0 and len(s) == len(r):
+            self.data["type"].append("r-s-Ring")
+        elif self.is_vertex_sp_features:
+            self.data["type"].append("vertex_sp")
 
         print('---   Experiment setup complete   ---')
 
@@ -162,7 +185,7 @@ class Experiment_Manager():
         print(f'---   Starting experiments on {self.dataset_str}   ---')
 
         data = {}
-        data["dataset"] = self.dataset_str
+        # data["dataset"] = self.dataset_str
         if self.dataset_str == 'ogbg-molhiv':
             data["loss_func"] = "BCE_with_logits_loss"
             data["metric"] = "rocauc"
@@ -219,7 +242,7 @@ class Experiment_Manager():
         print(f'---   Starting experiments on {self.dataset_str}   ---')
 
         data = {}
-        data["dataset"] = self.dataset_str
+        # data["dataset"] = self.dataset_str
         data["loss_func"] = "cross_entropy"
         data["metric"] = "acc"
         data["overall_time"] = -1.0
@@ -277,14 +300,14 @@ class Experiment_Manager():
         self.data.update(data)
 
     # Schedules multiple experiments
-    def run_ogb_experiments(self):
-        
+    def run_ogb_experiments(self) -> None:
+
         t0 = time.time()
 
         print(f'---   Starting experiments on {self.dataset_str}   ---')
 
         data = {}
-        data["dataset"] = self.dataset_str
+        # data["dataset"] = self.dataset_str
         if self.dataset_str == 'ogbg-molhiv':
             data["loss_func"] = "BCE_with_logits_loss"
             data["metric"] = "rocauc"
@@ -345,9 +368,9 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_clustering_path, max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
-                                                                                                                                                       hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
-                                                                                                                                                       n_epoch = best_classic_n_epoch, lr = best_classic_lr)
+        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+                                                                                                                                                    hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
+                                                                                                                                                    n_epoch = best_classic_n_epoch, lr = best_classic_lr, lo_idx_str = self.lo_idx_str)
 
         val_perfs = torch.tensor(best_val_perfs)
         val_mean = val_perfs.mean().item()
@@ -384,7 +407,7 @@ class Experiment_Manager():
 
         print('---   Running hyperparameter optimization for final enhanced GNN   ---')
         # Re-train enhanced gnn hyperparameter using clustering hyperparameter
-        enhanced_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = False, best_clustering_path = best_clustering_path, best_num_clusters = max_num_clusters, vertex_feature_path = best_features_path)
+        enhanced_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = False, best_clustering_path = best_clustering_path, best_num_clusters = max_num_clusters, vertex_feature_metadata_path = osp.join(best_features_path, best_feature_metadata_filename))
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
@@ -437,7 +460,7 @@ class Experiment_Manager():
 
         self.data.update(data)
 
-    def run_ogb_gnn_hyperparameter_optimization(self, classic_gnn: bool = True, best_clustering_path: Optional[str] = None, best_num_clusters: Optional[int] = None, vertex_feature_path: Optional[str] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
+    def run_ogb_gnn_hyperparameter_optimization(self, classic_gnn: bool = True, best_clustering_path: Optional[str] = None, best_num_clusters: Optional[int] = None, vertex_feature_metadata_path: Optional[str] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
         data = {}
 
         num_experiments = (len(self.num_layers) * len(self.hidden_channels) * len(self.batch_sizes) * len(self.num_epochs) * len(self.lrs))
@@ -532,7 +555,7 @@ class Experiment_Manager():
 
                             # Enhance the dataset with clustering_ids (using the previously computed information regarding the folds)
                             if not classic_gnn:
-                                feature_metadata_path = osp.join(vertex_feature_path, 'metadata.json')
+                                feature_metadata_path = osp.join(vertex_feature_metadata_path)
                                 dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, vertex_feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_path)
                                 # dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_path)
 
@@ -663,29 +686,76 @@ class Experiment_Manager():
         return data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr
 
 
-    def run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(self, clusterer: Vertex_Partition_Clustering, n_layers: int, hidden_channels: int, s_batch: int, n_epoch: int, lr: float) -> Tuple[Dict, str, Dict, int, int, int]:
+    def run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(self, clusterer: Vertex_Partition_Clustering, n_layers: int, hidden_channels: int, s_batch: int, n_epoch: int, lr: float, lo_idx_str: Optional[str] = "") -> Tuple[Dict, str, Dict, int, int, int]:
         data = {}
         num_experiments = -1
 
         # A list of paths to all the vertex feature directories that should be considered for hyperparameter optimization
         vertex_feature_paths = []
+        metadata_filenames = []
 
         # decide whether k-disks, r-s-rings or vertex_sp_features are used.
         if self.k is not None and len(self.k) > 0:
             # Use k-disks
             num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.k)
             for k in self.k:
-                vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_SP_features'))
+                if self.is_lovasz_feature:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_lo_features'))
+                    if self.dataset_str == "ogbg-molhiv":
+                        metadata_filenames.append(f"MOLHIV_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+                    elif self.dataset_str == "ogbg-ppa":
+                        metadata_filenames.append(f"PPA_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+                    # elif self.dataset_str == "CSL":
+                    #     metadata_filenames.append(f"CSL_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+                    # elif self.dataset_str.endswith("-Prox"):
+                    #     metadata_filenames.append(f"{self.h}-Prox_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+                else:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_SP_features'))
+                    if self.dataset_str == "ogbg-molhiv":
+                        metadata_filenames.append(f"MOLHIV_{k}-disk_SP_features_metadata.json")
+                    elif self.dataset_str == "ogbg-ppa":
+                        metadata_filenames.append(f"PPA_{k}-disk_SP_features_metadata.json")
+                    # elif self.dataset_str == "CSL":
+                    #     metadata_filenames.append(f"CSL_{k}-disk_SP_features_metadata.json")
+                    # elif self.dataset_str.endswith("-Prox"):
+                    #     metadata_filenames.append(f"{self.h}-Prox_{k}-disk_SP_features_metadata.json")
 
         elif self.r is not None and self.s is not None and len(self.r) > 0 and len(self.s) == len(self.r):
             # Use r-s-rings
             num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.r)
             for idx in range(len(self.r)):
-                vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_SP_features'))
+                if self.is_lovasz_feature:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_lo_features'))
+                    if self.dataset_str == "ogbg-molhiv":
+                        metadata_filenames.append(f"MOLHIV_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
+                    elif self.dataset_str == "ogbg-ppa":
+                        metadata_filenames.append(f"PPA_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
+                    # elif self.dataset_str == "CSL":
+                    #     metadata_filenames.append(f"CSL_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
+                    # elif self.dataset_str.endswith("-Prox"):
+                    #     metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
+                else:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_SP_features'))
+                    if self.dataset_str == "ogbg-molhiv":
+                        metadata_filenames.append(f"MOLHIV_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
+                    elif self.dataset_str == "ogbg-ppa":
+                        metadata_filenames.append(f"PPA_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
+                    elif self.dataset_str == "CSL":
+                        metadata_filenames.append(f"CSL_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
+                    elif self.dataset_str.endswith("-Prox"):
+                        metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
 
         elif self.is_vertex_sp_features:
             num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes)
             vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'vertex_SP_features'))
+            if self.dataset_str == "ogbg-molhiv":
+                metadata_filenames.append(f"MOLHIV_vertex_SP_features_metadata.json")
+            elif self.dataset_str == "ogbg-ppa":
+                metadata_filenames.append(f"PPA_vertex_SP_features_metadata.json")
+            elif self.dataset_str == "CSL":
+                metadata_filenames.append(f"CSL_vertex_SP_features_metadata.json")
+            elif self.dataset_str.endswith("-Prox"):
+                metadata_filenames.append(f"{self.h}-Prox_vertex_SP_features_metadata.json")
 
         else:
             raise ValueError("Invalid vertex feature identifiers")
@@ -725,6 +795,7 @@ class Experiment_Manager():
         # iterate over the hyperparameters for this step
         best_avg_val_perf = 0.0
         best_features_path = ""
+        best_features_metadata_filename = ""
         best_clustering_metadata_path = ""
         best_num_clusters = 0
         best_lsa_dim = 0
@@ -745,14 +816,14 @@ class Experiment_Manager():
         for n_cluster in self.num_clusters:
             for lsa_d in self.lsa_dims:
                 for min_cluster_size in self.min_cluster_sizes:
-                    for vertex_feature_path in vertex_feature_paths:
+                    for path_idx, vertex_feature_path in enumerate(vertex_feature_paths):
                         experiment_start = time.time()
 
                         data["experiment_idx"][cur_experiment_idx] = {}
                         data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
                         data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
-                        vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, 'metadata.json'))
+                        vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
 
                         # Load dataset and split
                         dataset = PygGraphPropPredDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path))
@@ -915,6 +986,7 @@ class Experiment_Manager():
                         if best_avg_val_perf < mean_val_perf:
                             best_avg_val_perf = mean_val_perf
                             best_features_path = vertex_feature_path
+                            best_features_metadata_filename = metadata_filenames[path_idx]
                             best_min_cluster_size = min_cluster_size
                             best_lsa_dim = lsa_d
                             best_num_clusters = n_cluster
@@ -936,6 +1008,7 @@ class Experiment_Manager():
         data["res"]["best_avg_val_perf"] = best_avg_val_perf
         data["res"]["best_experiment_idx"] = best_val_perf_experiment_idx
         data["res"]["best_features_path"] = best_features_path
+        data["res"]["best_feature_metadata_filename"] = best_features_metadata_filename
         data["res"]["best_num_clusters"] = best_num_clusters
         data["res"]["best_lsa_dim"] = best_lsa_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
@@ -953,7 +1026,7 @@ class Experiment_Manager():
         data["times"]["rerun_avg"] = avg_rerun_time_overall
         data["times"]["epoch_avg"] = avg_epoch_time_overall
 
-        return data, best_val_perfs, best_test_perfs, best_features_path, best_clustering_metadata_path, best_max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size
+        return data, best_val_perfs, best_test_perfs, best_features_path, best_features_metadata_filename, best_clustering_metadata_path, best_max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size
 
 
     # Schedules multiple experiments
@@ -1022,9 +1095,9 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_clustering_paths, max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
                                                                                                                                                        hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
-                                                                                                                                                       n_epoch = best_classic_n_epoch, lr = best_classic_lr, splits = splits, loss_func = loss_func)
+                                                                                                                                                       n_epoch = best_classic_n_epoch, lr = best_classic_lr, splits = splits, loss_func = loss_func, lo_idx_str = self.lo_idx_str)
 
         val_accs = torch.tensor(best_val_accs)
         test_accs = torch.tensor(best_test_accs)
@@ -1061,7 +1134,7 @@ class Experiment_Manager():
 
         print('---   Running hyperparameter optimization for final enhanced GNN   ---')
         # Re-train enhanced gnn hyperparameter using clustering hyperparameter
-        enhanced_hyperparameter_opt_data, best_val_accs, best_test_accs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = False, best_clustering_paths = best_clustering_paths, best_num_clusters = max_num_clusters, vertex_feature_path = best_features_path)
+        enhanced_hyperparameter_opt_data, best_val_accs, best_test_accs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = False, best_clustering_paths = best_clustering_paths, best_num_clusters = max_num_clusters, best_vertex_feature_metadata_path = osp.join(best_features_path, best_feature_metadata_filename))
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
@@ -1113,7 +1186,7 @@ class Experiment_Manager():
 
         self.data.update(data)
 
-    def run_csl_prox_gnn_hyperparameter_optimization(self, splits: Dict, loss_func, classic_gnn: bool = True, best_clustering_paths: Optional[Dict] = None, best_num_clusters: Optional[int] = None, vertex_feature_path: Optional[str] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
+    def run_csl_prox_gnn_hyperparameter_optimization(self, splits: Dict, loss_func, classic_gnn: bool = True, best_clustering_paths: Optional[Dict] = None, best_num_clusters: Optional[int] = None, best_vertex_feature_metadata_path: Optional[str] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
         data = {}
 
         data["num_experiments"] = (len(self.num_layers) * len(self.hidden_channels) * len(self.batch_sizes) * len(self.num_epochs) * len(self.lrs))
@@ -1239,7 +1312,7 @@ class Experiment_Manager():
                                         dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
                                     elif self.dataset_str.endswith('-Prox'):
                                         dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
-                                    feature_metadata_path = osp.join(vertex_feature_path, 'metadata.json')
+                                    feature_metadata_path = best_vertex_feature_metadata_path
                                     dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, vertex_feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[idx])
                                     # dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[idx])
 
@@ -1397,30 +1470,57 @@ class Experiment_Manager():
         return avg_val_acc, rerun_data, avg_test_acc, avg_time_rerun, avg_time_epoch_overall
     
     # Optimizing the hyperparameters used for clustering: num_clusters, lsa_dim, min_cluster_size, k/r&s
-    def run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(self, clusterer: Vertex_Partition_Clustering, n_layers: int, hidden_channels: int, s_batch: int, n_epoch: int, lr: float, splits: Dict, loss_func) -> Tuple[Dict, str, Dict, int, int, int]:
+    def run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(self, clusterer: Vertex_Partition_Clustering, n_layers: int, hidden_channels: int, s_batch: int, n_epoch: int, lr: float, splits: Dict, loss_func, lo_idx_str: str = "") -> Tuple[Dict, str, Dict, int, int, int]:
 
         data = {}
         num_experiments = -1
 
         # A list of paths to all the vertex feature directories that should be considered for hyperparameter optimization
         vertex_feature_paths = []
+        metadata_filenames = []
 
         # decide whether k-disks, r-s-rings or vertex_sp_features are used.
         if self.k is not None and len(self.k) > 0:
             # Use k-disks
             num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.k)
             for k in self.k:
-                vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_SP_features'))
+                if self.is_lovasz_feature:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_lo_features'))
+                    if self.dataset_str == "CSL":
+                        metadata_filenames.append(f"CSL_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+                    elif self.dataset_str.endswith("-Prox"):
+                        metadata_filenames.append(f"{self.h}-Prox_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+                else:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_SP_features'))
+                    if self.dataset_str == "CSL":
+                        metadata_filenames.append(f"CSL_{k}-disk_SP_features_metadata.json")
+                    elif self.dataset_str.endswith("-Prox"):
+                        metadata_filenames.append(f"{self.h}-Prox_{k}-disk_SP_features_metadata.json")
 
         elif self.r is not None and self.s is not None and len(self.r) > 0 and len(self.s) == len(self.r):
             # Use r-s-rings
             num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.r)
             for idx in range(len(self.r)):
-                vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_SP_features'))
+                if self.is_lovasz_feature:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_lo_features'))
+                    if self.dataset_str == "CSL":
+                        metadata_filenames.append(f"CSL_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
+                    elif self.dataset_str.endswith("-Prox"):
+                        metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
+                else:
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_SP_features'))
+                    if self.dataset_str == "CSL":
+                        metadata_filenames.append(f"CSL_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
+                    elif self.dataset_str.endswith("-Prox"):
+                        metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
 
         elif self.is_vertex_sp_features:
             num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes)
             vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'vertex_SP_features'))
+            if self.dataset_str == "CSL":
+                metadata_filenames.append(f"CSL_vertex_SP_features_metadata.json")
+            elif self.dataset_str.endswith("-Prox"):
+                metadata_filenames.append(f"{self.h}-Prox_vertex_SP_features_metadata.json")
 
         else:
             raise ValueError("Invalid vertex feature identifiers")
@@ -1461,6 +1561,7 @@ class Experiment_Manager():
         # iterate over the hyperparameters for this step
         best_avg_val_acc = 0.0
         best_features_path = ""
+        best_features_metadata_filename = ""
         best_clustering_metadata_paths = {} # For each experiment we store the cluster results for each fold
         best_num_clusters = 0
         best_lsa_dim = 0
@@ -1484,7 +1585,7 @@ class Experiment_Manager():
         for n_cluster in self.num_clusters:
             for lsa_d in self.lsa_dims:
                 for min_cluster_size in self.min_cluster_sizes:
-                    for vertex_feature_path in vertex_feature_paths:
+                    for path_idx, vertex_feature_path in enumerate(vertex_feature_paths):
                         # Run the optimization, the different feature datasets are defined by the vertex_feature_path
                         experiment_start = time.time()
 
@@ -1493,7 +1594,7 @@ class Experiment_Manager():
                         elif self.dataset_str.endswith('-Prox'):
                             dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
 
-                        vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, 'metadata.json'))
+                        vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
                         # set up clusterer
                         feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
                         dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
@@ -1633,6 +1734,7 @@ class Experiment_Manager():
                             best_lsa_dim = lsa_d
                             best_num_clusters = n_cluster
                             best_features_path = vertex_feature_path
+                            best_features_metadata_filename = metadata_filenames[path_idx]
                             best_val_acc_experiment_idx = cur_experiment_idx
                             best_clustering_metadata_paths = fold_clustering_metadata_paths
                             best_max_num_clusters = max_num_clusters
@@ -1653,6 +1755,7 @@ class Experiment_Manager():
         data["res"]["best_avg_val_acc"] = best_avg_val_acc
         data["res"]["best_experiment_idx"] = best_val_acc_experiment_idx
         data["res"]["best_features_path"] = best_features_path
+        data["res"]["best_feature_metadata_filename"] = best_features_metadata_filename
         data["res"]["best_num_clusters"] = best_num_clusters
         data["res"]["best_lsa_dim"] = best_lsa_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
@@ -1672,7 +1775,10 @@ class Experiment_Manager():
         data["times"]["rerun_avg"] = avg_rerun_time_overall
         data["times"]["epoch_avg"] = avg_epoch_time_overall
 
-        return data, best_val_accs, best_test_accs, best_features_path, best_clustering_metadata_paths, best_max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size
+        return data, best_val_accs, best_test_accs, best_features_path, best_features_metadata_filename, best_clustering_metadata_paths, best_max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size
+
+    def get_data(self) -> Dict:
+        return deepcopy(self.data)
 
     def train_ogb(self, gnn: GNN_Manager, loader: DataLoader, desc: str) -> float:
         total_loss = 0.0

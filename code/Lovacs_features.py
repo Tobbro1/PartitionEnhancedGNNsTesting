@@ -1,6 +1,7 @@
 # General imports
 from typing import List, Optional, Tuple, Union, Dict
 import time
+from copy import copy
 
 # numpy
 import numpy as np
@@ -52,6 +53,8 @@ class Lovasz_graph_features():
         else:
             self.rng = np.random.default_rng() # unpredictable, unseeded
 
+        self.P = None # used in welzls move to fron variant
+
     # graph_size_range represents a tuple of the minimum subset size and maximum subset size that is considered (the values for d, thus the coordinates in the feature vector). 
     # This allows the feature dimension to be more reasonably controlled, especially if the graph sizes are very uneven.
     # num_samples is the number of random samples drawn for a given dimension (s_d in the original paper)
@@ -72,7 +75,7 @@ class Lovasz_graph_features():
             # Randomly sample subsets
             lovasz_values = []
 
-            found_indices = np.zeros(shape = (1,d), dtype = int) # Store the already found indices
+            found_indices = np.zeros(shape = (cur_num_samples, d), dtype = int) # Store the already found indices
 
             for idx in range(cur_num_samples):
                 if d == num_vertices:
@@ -83,13 +86,15 @@ class Lovasz_graph_features():
                     while not is_new:
                         indices = self.rng.choice(a = num_vertices, size = d, replace = False)
                         if not np.any(np.all(indices == found_indices, axis = 0)):
-                            np.concatenate((found_indices, indices), axis = 0)
+                            found_indices[idx, :] = indices
                             is_new = True
                     
                 # indices is the newly generated subset
                 lovasz_values.append(self.compute_min_enclosing_cone_theta(U = orthonormal_representation[:,indices]))
 
-            result[d + 2] = np.mean(lovasz_values)
+            d_idx = 2 + (d - min_size) - 1
+
+            result[d_idx] = np.mean(lovasz_values)
 
         return result, time.time() - t0
 
@@ -120,6 +125,13 @@ class Lovasz_graph_features():
 
         if num_vertices == 1:
             return 1.0
+        
+        # Supress print of the iterations when calculating the solution of an SDP
+        solvers.options["show_progress"] = False
+        
+        # Set the maximum number of iterations when calculating the solution of an SDP
+        if constants.sdp_max_iters is not None:
+            solvers.options["maxiters"] = constants.sdp_max_iters
         
         # Solve sdp formulation given by Lovasz in the paper about the Shannon capacity of graphs:
         # Let {1,...,n} be the vertices of the given graph. Let B in R^nxn range over all p.s.d. matrices such that
@@ -236,14 +248,29 @@ class Lovasz_graph_features():
         P = self.rng.permutation(num_vectors)
         R = np.asarray([], dtype = int)
         
-        c, _ = self.welzl_enclosing_ball(U = U, P = P, R = R)
+        # t0 = time.time()
+        c, _ = self.welzl_enclosing_ball(U = U.copy(), P = P.copy(), R = R.copy())
+        # rec_time = time.time() - t0
+
+        # t0_it = time.time()
+        # c_it, _ = self.welzl_enclosing_ball_iterative(U = U.copy(), P = P.copy(), R = R.copy())
+        # it_time = time.time() - t0_it
+        # print(f"Diff Recursive - iterative: {rec_time - it_time}")
+
+        # self.P = P
+
+        # t0_mtf = time.time()
+        # c_mtf, _ = self.welzl_enclosing_ball_move_to_front(U = U.copy(), P_complement = np.asarray([], dtype = int), R = R.copy())
+        # mtf_time = time.time() - t0_mtf
+        # print(f"Diff recursive - mtf: {rec_time - mtf_time}")
+        # print(f"Time mtf: {mtf_time}")
         
         # We need to normalize c according to https://proceedings.mlr.press/v32/johansson14.pdf
         norm_c = np.linalg.norm(c, 2)
         if norm_c != 0:
             c = c / norm_c
 
-        # theta = max_{u_i} 1/(c^tr u_i)
+        # theta = max_{u_i} 1/(c^tr u_i)^2
         theta = -1.0
         for i in range(num_vectors):
             val = np.dot(c, U[:,i]).item() ** 2
@@ -274,16 +301,112 @@ class Lovasz_graph_features():
         else:
             # randomly choose a point p
             p = P[self.rng.integers(low = 0, high = num_p)]
-            # Calculate the minidisk without p
             P_prime = np.delete(P, np.where(P == p))
+            # Calculate the minidisk without p
             c, r = self.welzl_enclosing_ball(U, P_prime, R)
             if abs(np.linalg.norm(U[:,p] - c) - r) > self.tolerance:
                 # p is not contained in the disk generated without p, thus p is a border point for this choice of P and R
                 if p not in R:
                     R_prime = np.pad(R, [(0, 1)], mode='constant', constant_values=p)
-                c, r = self.welzl_enclosing_ball(U, P_prime, R_prime)
-        
+                    c, r = self.welzl_enclosing_ball(U, P_prime, R_prime)
+
         return c, r
+    
+    # Implements welzls algorithm to recursively compute the smallest enclosing disk in a hyperplane of a set of vectors
+    # see: https://www.ibr.cs.tu-bs.de/courses/ws2122/ag/otherstuff/smallest-disk-welzl.pdf
+    # P is a gives a permutation of indices of vectors of U that are considered. In recursive calls, elements of P are removed.
+    # R is a set of indices of vectors that are considered border vectors of the disk.
+    def welzl_enclosing_ball_move_to_front(self, U: np.ndarray, P_complement: np.ndarray, R: np.ndarray) -> Tuple[np.ndarray, float]:
+
+        embedding_dim = U.shape[0]
+        P = np.delete(self.P, np.argwhere(np.isin(self.P, P_complement)))
+        num_p = P.shape[0]
+        num_r = R.shape[0]
+        
+        # Analogous to Welzls algorithm since we generalize from the 2-dim case, we need to test for embedding_dim + 1
+        if num_p == 0 or num_r == embedding_dim + 1:
+            if num_r == 0:
+                return np.zeros(shape = (embedding_dim,)), 0.0
+            else:
+                # We have d+1 border points and can thus solve for the center
+                c, r = self.calc_min_ball(U[:,R])
+        else:
+            # choose the last point in P since P is already a random permutation of the points
+            p = P[-1]
+            P_complement_prime = np.pad(P_complement, [(0,1)], mode = 'constant', constant_values = p)
+            # Calculate the minidisk without p
+            c, r = self.welzl_enclosing_ball_move_to_front(U, P_complement_prime, R)
+            if abs(np.linalg.norm(U[:,p] - c) - r) > self.tolerance:
+                # p is not contained in the disk generated without p, thus p is a border point for this choice of P and R
+                if p not in R:
+                    R_prime = np.pad(R, [(0, 1)], mode='constant', constant_values=p)
+                    c, r = self.welzl_enclosing_ball_move_to_front(U, P_complement_prime, R_prime)
+                    # move p to the first position
+                    self.P = np.delete(self.P, np.where(self.P == p))
+                    self.P = np.pad(self.P, [(1,0)], mode = 'constant', constant_values = p)
+                    
+
+        return c, r
+    
+    # Iterative version of the recursive implementation using a stack to try optimizing the calculation
+    def welzl_enclosing_ball_iterative(self, U: np.ndarray, P: np.ndarray, R: np.ndarray) -> Tuple[np.ndarray, float]:
+
+        # Utilises a stack given by a list
+        # Each iteration has to pass the parameters P, R
+        stack = []
+        # The results are Dicts of c, r
+        results = []
+        # If stage == 1, it is handled as a normal call. If stage == 2 the check whether a given point is in a calculated ball is performed
+        # Each call gives the parameters stage, P, R, p where p is only used if stage == 2 to check.
+        
+        embedding_dim = U.shape[0]
+
+        # initial call of the function
+        stack.append(tuple((1, P.copy(), R.copy(), None)))
+        
+        # loop
+        while(len(stack) > 0):
+            stage, P, R, p = stack.pop()
+
+            if stage == 1:
+                num_p = P.shape[0]
+                num_r = R.shape[0]
+
+                if num_p == 0 or num_r == embedding_dim + 1:
+                    if num_r == 0:
+                        results.append(tuple((np.zeros(shape = (embedding_dim,)), 0.0)))
+                    else:
+                        # We have d+1 border points and can thus solve for the center
+                        c, r = self.calc_min_ball(U[:,R])
+                        results.append(tuple((c, r)))
+
+                else:
+                    # randomly choose a point p
+                    p = P[self.rng.integers(low = 0, high = num_p)]
+                    # Calculate the minidisk without p
+                    P_prime = np.delete(P, np.where(P == p))
+
+                    # Recursive call in the original
+
+                    # Then check whether the point is in the ball (since we use a stack, we need to append using this reversed order)
+                    stack.append(tuple((2, P_prime.copy(), R.copy(), p.copy())))
+                    # First compute c and r (the recursive step)
+                    stack.append(tuple((1, P_prime.copy(), R.copy(), None)))
+
+            elif stage == 2:
+                # c, r = self.welzl_enclosing_ball(U, P_prime, R)
+                c, r = results.pop()
+
+                if abs(np.linalg.norm(U[:,p] - c) - r) > self.tolerance:
+                    # p is not contained in the disk generated without p, thus p is a border point for this choice of P and R
+                    if p not in R:
+                        R_prime = np.pad(R, [(0, 1)], mode='constant', constant_values=p)
+                        # Recursive call
+                        stack.append(tuple((1, P.copy(), R_prime.copy(), None)))
+                else:
+                    results.append(c, r)
+
+        return results.pop()
 
     # Only temporary
     def calc_min_ball(self, A: np.ndarray) -> Tuple[np.ndarray, float]:
@@ -408,108 +531,108 @@ if __name__ == '__main__':
 
     util.initialize_random_seeds(constants.SEED)
 
-    # # Test the fitball method
-    # # d = 4
-    # p1 = np.asarray([1,2,3,4]).reshape((-1,1))
-    # p2 = np.asarray([1,3,3,4]).reshape((-1,1))
-    # p3 = np.asarray([0,0,1,1]).reshape((-1,1))
-    # p4 = np.asarray([0,0,0,0]).reshape((-1,1))
-    # p5 = np.asarray([4,4,4,4]).reshape((-1,1))
+    # Test the fitball method
+    # d = 4
+    p1 = np.asarray([1,2,3,4]).reshape((-1,1))
+    p2 = np.asarray([1,3,3,4]).reshape((-1,1))
+    p3 = np.asarray([0,0,1,1]).reshape((-1,1))
+    p4 = np.asarray([0,0,0,0]).reshape((-1,1))
+    p5 = np.asarray([4,4,4,4]).reshape((-1,1))
 
-    # points = [p1,p2,p5]
+    points = [p1,p2,p5]
 
-    # A = np.concatenate(tuple(points), axis = 1)
-    # n = A.shape[1]
+    A = np.concatenate(tuple(points), axis = 1)
+    n = A.shape[1]
 
-    # lf = Lovasz_graph_features(embedding_dim = 4)
-    # #c, r = lf.welzl_enclosing_ball(U = A, P = np.random.permutation(n) - 1, R = np.asarray([], dtype = int))
-    # try:
-    #     c, r = lf.calc_min_ball(A)
-    # except Exception as e:
-    #     c = np.zeros(shape = (A.shape[0],))
-    #     r = 0.0
-    #     print(repr(e))
+    lf = Lovasz_graph_features(embedding_dim = 4)
+    #c, r = lf.welzl_enclosing_ball(U = A, P = np.random.permutation(n) - 1, R = np.asarray([], dtype = int))
+    try:
+        c, r = lf.calc_min_ball(A)
+    except Exception as e:
+        c = np.zeros(shape = (A.shape[0],))
+        r = 0.0
+        print(repr(e))
 
-    # # verify
-    # c_grakel, r_grakel = _fitball_(A)
+    # verify
+    c_grakel, r_grakel = _fitball_(A)
 
-    # print('finished test')
-    # print(f'center diff: {c - c_grakel}')
-    # print(f'radius diff: {r - r_grakel}')
-    # for idx, point in enumerate(points):
-    #     point = point.reshape(-1)
-    #     #diff = np.linalg.norm(point - c, 2)
-    #     diff = np.sqrt(np.dot(point-c, point-c))
-    #     print(f'Point {idx} distance from center: {diff}, radius: {r}, correct: {np.allclose(np.asarray([diff]), r)}')
-    #     #diff_grakel = np.linalg.norm(point - c_grakel, 2)
-    #     diff_grakel = np.sqrt(np.dot(point-c_grakel, point-c_grakel))
-    #     print(f'Point {idx} distance from GraKel center: {diff_grakel}, radius: : {r_grakel}, correct: {np.allclose(np.asarray([diff_grakel]), r_grakel)}')
+    print('finished test')
+    print(f'center diff: {c - c_grakel}')
+    print(f'radius diff: {r - r_grakel}')
+    for idx, point in enumerate(points):
+        point = point.reshape(-1)
+        #diff = np.linalg.norm(point - c, 2)
+        diff = np.sqrt(np.dot(point-c, point-c))
+        print(f'Point {idx} distance from center: {diff}, radius: {r}, correct: {np.allclose(np.asarray([diff]), r)}')
+        #diff_grakel = np.linalg.norm(point - c_grakel, 2)
+        diff_grakel = np.sqrt(np.dot(point-c_grakel, point-c_grakel))
+        print(f'Point {idx} distance from GraKel center: {diff_grakel}, radius: : {r_grakel}, correct: {np.allclose(np.asarray([diff_grakel]), r_grakel)}')
 
-    n = 4
+    # n = 4
 
-    # Testing for some graphs with known values (Graphs and values taken from the Wikipedia page of the Lovasz number)
+    # # Testing for some graphs with known values (Graphs and values taken from the Wikipedia page of the Lovasz number)
 
-    # Complete graph
-    n_complete = n
+    # # Complete graph
+    # n_complete = n
 
-    edge_index_complete = torch.zeros([2, n_complete**2 - n_complete])
-    e = 0
-    for (i,j) in product(range(n_complete), range(n_complete)):
-        if i == j:
-            continue
-        edge_index_complete[:,e] = torch.tensor([i,j])
-        e += 1
-    x = torch.zeros(n_complete)
-    graph_complete = Data(x = x, edge_index = edge_index_complete)
+    # edge_index_complete = torch.zeros([2, n_complete**2 - n_complete])
+    # e = 0
+    # for (i,j) in product(range(n_complete), range(n_complete)):
+    #     if i == j:
+    #         continue
+    #     edge_index_complete[:,e] = torch.tensor([i,j])
+    #     e += 1
+    # x = torch.zeros(n_complete)
+    # graph_complete = Data(x = x, edge_index = edge_index_complete)
 
-    # Empty graph
-    n_empty = n
-    graph_empty = Data(x = torch.zeros(n_empty))
+    # # Empty graph
+    # n_empty = n
+    # graph_empty = Data(x = torch.zeros(n_empty))
 
-    # Pentagon graph
-    n_pent = 5
-    edge_index_pent = torch.zeros([2, 10])
-    edge_index_pent[:,0] = torch.tensor([0,1])
-    edge_index_pent[:,1] = torch.tensor([1,0])
-    edge_index_pent[:,2] = torch.tensor([1,2])
-    edge_index_pent[:,3] = torch.tensor([2,1])
-    edge_index_pent[:,4] = torch.tensor([2,3])
-    edge_index_pent[:,5] = torch.tensor([3,2])
-    edge_index_pent[:,6] = torch.tensor([3,4])
-    edge_index_pent[:,7] = torch.tensor([4,3])
-    edge_index_pent[:,8] = torch.tensor([4,0])
-    edge_index_pent[:,9] = torch.tensor([0,4])
-    graph_pent = Data(x = torch.zeros(n_pent), edge_index = edge_index_pent)
+    # # Pentagon graph
+    # n_pent = 5
+    # edge_index_pent = torch.zeros([2, 10])
+    # edge_index_pent[:,0] = torch.tensor([0,1])
+    # edge_index_pent[:,1] = torch.tensor([1,0])
+    # edge_index_pent[:,2] = torch.tensor([1,2])
+    # edge_index_pent[:,3] = torch.tensor([2,1])
+    # edge_index_pent[:,4] = torch.tensor([2,3])
+    # edge_index_pent[:,5] = torch.tensor([3,2])
+    # edge_index_pent[:,6] = torch.tensor([3,4])
+    # edge_index_pent[:,7] = torch.tensor([4,3])
+    # edge_index_pent[:,8] = torch.tensor([4,0])
+    # edge_index_pent[:,9] = torch.tensor([0,4])
+    # graph_pent = Data(x = torch.zeros(n_pent), edge_index = edge_index_pent)
 
-    lf = Lovasz_graph_features(100000000)
+    # lf = Lovasz_graph_features(100000000)
 
-    theta_complete, S_complete = lf.compute_lovasz_number(graph = graph_complete, num_vertices = n_complete)
-    print(f"theta(K_{n_complete}) = {theta_complete}; Should be {1}.")
-    print(f"Slack vairables: \n{S_complete}")
-    print(f"Is pos semidefinite: {is_pos_semidefinite(S_complete)}")
+    # theta_complete, S_complete = lf.compute_lovasz_number(graph = graph_complete, num_vertices = n_complete)
+    # print(f"theta(K_{n_complete}) = {theta_complete}; Should be {1}.")
+    # print(f"Slack vairables: \n{S_complete}")
+    # print(f"Is pos semidefinite: {is_pos_semidefinite(S_complete)}")
 
-    U = lf.compute_orthonormal_basis(theta = theta_complete, S = S_complete, embedding_dim = n_complete + 1)
-    theta_complete_cone = lf.compute_min_enclosing_cone_theta(U = U)
-    print(f"Theta from orthonormal basis: {theta_complete_cone}")
+    # U = lf.compute_orthonormal_basis(theta = theta_complete, S = S_complete, embedding_dim = n_complete + 1)
+    # theta_complete_cone = lf.compute_min_enclosing_cone_theta(U = U)
+    # print(f"Theta from orthonormal basis: {theta_complete_cone}")
 
-    print("")
+    # print("")
 
-    theta_empty, S_empty = lf.compute_lovasz_number(graph = graph_empty, num_vertices = n_empty)
-    print(f"theta(Complement of K_{n_empty}) = {theta_empty}; Should be {n_empty}.")
-    print(f"Slack vairables: \n{S_empty}")
-    print(f"Is pos semidefinite: {is_pos_semidefinite(S_empty)}")
+    # theta_empty, S_empty = lf.compute_lovasz_number(graph = graph_empty, num_vertices = n_empty)
+    # print(f"theta(Complement of K_{n_empty}) = {theta_empty}; Should be {n_empty}.")
+    # print(f"Slack vairables: \n{S_empty}")
+    # print(f"Is pos semidefinite: {is_pos_semidefinite(S_empty)}")
 
-    U = lf.compute_orthonormal_basis(theta = theta_empty, S = S_empty, embedding_dim = n_empty + 1)
-    theta_empty_cone = lf.compute_min_enclosing_cone_theta(U = U)
-    print(f"Theta from orthonormal basis: {theta_empty_cone}")
+    # U = lf.compute_orthonormal_basis(theta = theta_empty, S = S_empty, embedding_dim = n_empty + 1)
+    # theta_empty_cone = lf.compute_min_enclosing_cone_theta(U = U)
+    # print(f"Theta from orthonormal basis: {theta_empty_cone}")
 
-    print("")
+    # print("")
 
-    theta_pent, S_pent = lf.compute_lovasz_number(graph = graph_pent, num_vertices = n_pent)
-    print(f"theta(C_5) = {theta_pent}; Should be {math.sqrt(5)}.")
-    print(f"Slack vairables: \n{S_pent}")
-    print(f"Is pos semidefinite: {is_pos_semidefinite(S_pent)}")
+    # theta_pent, S_pent = lf.compute_lovasz_number(graph = graph_pent, num_vertices = n_pent)
+    # print(f"theta(C_5) = {theta_pent}; Should be {math.sqrt(5)}.")
+    # print(f"Slack vairables: \n{S_pent}")
+    # print(f"Is pos semidefinite: {is_pos_semidefinite(S_pent)}")
 
-    U = lf.compute_orthonormal_basis(theta = theta_pent, S = S_pent, embedding_dim = n_pent + 1)
-    theta_pent_cone = lf.compute_min_enclosing_cone_theta(U = U)
-    print(f"Theta from orthonormal basis: {theta_pent_cone}")
+    # U = lf.compute_orthonormal_basis(theta = theta_pent, S = S_pent, embedding_dim = n_pent + 1)
+    # theta_pent_cone = lf.compute_min_enclosing_cone_theta(U = U)
+    # print(f"Theta from orthonormal basis: {theta_pent_cone}")

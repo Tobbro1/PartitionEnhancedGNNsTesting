@@ -92,7 +92,7 @@ class Feature_Generator():
 
         # Initialize for readable order in the file
         self.metadata = {}
-        self.metadata["path_prefix"] = self.absolute_path_prefix
+        # self.metadata["path_prefix"] = self.absolute_path_prefix
         self.metadata["dataset_prop"] = {}
         self.metadata["dataset_prop"]["desc"] = dataset_desc
         if self.node_pred:
@@ -399,7 +399,7 @@ class Feature_Generator():
                 open(p, 'w').close()  
 
             with open(p, "w") as file:
-                file.write(json.dumps(self.metadata, indent=4))
+                file.write(json.dumps(self.get_metadata(), indent=4))
 
     # # Analogous implementatio nto the normal generate_features function, put into its own function due to significant differences in post-processing
     # def generate_features_two_WL(self, chunksize: int = 1, vector_buffer_size: int = 256, num_processes: int=1, comment: Optional[str]=None, log_times: bool = False, dump_times: bool = False, time_summary_path: str = "", time_summary_filename: Optional[str] = None):

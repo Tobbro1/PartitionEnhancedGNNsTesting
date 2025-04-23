@@ -19,7 +19,7 @@
             "console": "integratedTerminal",
             "args": [
                 "-f",
-                "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\example_feature_gen.json"
+                "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\testing_feature_gen.json"
             ]
         }
     ]

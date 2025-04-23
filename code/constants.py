@@ -13,9 +13,9 @@ vector_buffer_size = 16_384
 
 # Used for lovasz features
 num_lo_gens = 2 # Number of times the Lovasz features are generated in order to 
-sdp_max_iters = None # maximum number of iterations done in the sdp solver used in computing the lo-theta value of a graph
+sdp_max_iters = 20 # maximum number of iterations done in the sdp solver used in computing the lo-theta value of a graph
 lo_small_val = float("1e-13") # Used to make the zero matrix pos definite if necessary
-welzl_tolerance = float("1e-1")
+welzl_tolerance = float("1e-10")
 
 # Used in the experiments
 num_workers = 0 # The number of worker processes used in the dataloaders for gnn training, 0 means not utilising parallelization in this step
