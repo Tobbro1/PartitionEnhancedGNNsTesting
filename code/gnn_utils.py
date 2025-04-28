@@ -70,12 +70,12 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
                 # If the features are passed, we have to copy them in order to ensure that we do not change the original dataset
                 feature_dataset = feature_dataset.copy()
 
-            # apply lsa if necessary
-            lsa = None
-            if cluster_metadata["lsa"]["lsa_used"]:
-                lsa = util.read_pickle(path = osp.join(absolute_path_prefix, cluster_metadata["lsa"]["path"]))
+            # apply pca if necessary
+            pca = None
+            if cluster_metadata["pca"]["pca_used"]:
+                pca = util.read_pickle(path = osp.join(absolute_path_prefix, cluster_metadata["pca"]["path"]))
 
-                feature_dataset = lsa.transform(feature_dataset)
+                feature_dataset = pca.transform(feature_dataset)
 
             # get cluster_ids
 
@@ -138,9 +138,9 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
 
 #     normalize = cluster_metadata["dataset_prop"]["normalized"]
 
-#     lsa = None
-#     if cluster_metadata["lsa"]["lsa_used"]:
-#         lsa = util.read_pickle(path = osp.join(absolute_path_prefix, cluster_metadata["lsa"]["path"]))
+#     pca = None
+#     if cluster_metadata["pca"]["pca_used"]:
+#         pca = util.read_pickle(path = osp.join(absolute_path_prefix, cluster_metadata["pca"]["path"]))
 
 #     # Read relevant dataset feature info from metadata file      
 #     database_feature_vectors_path = feature_metadata["result_prop"]["path"]
@@ -183,7 +183,7 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
 #         #         cluster_ids[vertex_id] = get_cluster_id_node_pred(vertex_id = vertex_id, dataset_properties = dataset_properties, algorithm = cluster_alg, graph = graph_data, feature_vectors = feature_data, feature_identifier = feature_identifier, sp_features = sp_features, centroids = centroids, medoids = medoids).item()
 #         #     graph_data.x = torch.cat((cluster_ids, graph_data.x), dim = 1)
 #         else:
-#             cluster_ids = get_cluster_ids(graph_id = graph_id, dataset_properties = dataset_properties, algorithm = cluster_alg, lsa = lsa, normalize = normalize, graph = graph_data, feature_vectors_database = feature_data, feature_identifier = feature_identifier, centroids = centroids, medoids = medoids)
+#             cluster_ids = get_cluster_ids(graph_id = graph_id, dataset_properties = dataset_properties, algorithm = cluster_alg, pca = pca, normalize = normalize, graph = graph_data, feature_vectors_database = feature_data, feature_identifier = feature_identifier, centroids = centroids, medoids = medoids)
 #             # cluster_ids = cluster_ids.view(-1,1)
 #             total_clustering_id_vector[start_idx:start_idx + num_vertices] = cluster_ids
 #             cluster_ids = cluster_ids.view(-1,1)
@@ -197,22 +197,22 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
 
 #     return dataset, time.time() - t0
 
-def transform_feature_vector(vector, normalize: bool, lsa = None) -> np.ndarray:
+def transform_feature_vector(vector, normalize: bool, pca = None) -> np.ndarray:
     if not isinstance(vector, np.ndarray):
         vector = vector.toarray()
     
     if normalize:
         vector = prepocessing.normalize(vector, axis = 1)
 
-    if lsa is not None:
-        vector = lsa.transform(vector)
+    if pca is not None:
+        vector = pca.transform(vector)
 
     return vector
 
 # Returns the cluster_ids for all vertices in a given graph with id graph_id
 # Currently only works with centroids or medoids based clustering algorithm
 # Currently only implemented for graph_pred tasks
-def get_cluster_ids(graph_id: int, dataset_properties: Dataset_Properties_Manager, algorithm: Clustering_Algorithm, lsa, normalize: bool = False, graph: Optional[Data] = None, feature_vectors_database: Optional[spmatrix] = None, feature_identifier: Dict[str, str] = None, centroids: Optional[np.ndarray] = None, medoids: Optional[np.ndarray] = None) -> Tensor:
+def get_cluster_ids(graph_id: int, dataset_properties: Dataset_Properties_Manager, algorithm: Clustering_Algorithm, pca, normalize: bool = False, graph: Optional[Data] = None, feature_vectors_database: Optional[spmatrix] = None, feature_identifier: Dict[str, str] = None, centroids: Optional[np.ndarray] = None, medoids: Optional[np.ndarray] = None) -> Tensor:
     
     # a list of all feature vectors of vertices in the given graph
     feature_vectors_graph = []
@@ -232,7 +232,7 @@ def get_cluster_ids(graph_id: int, dataset_properties: Dataset_Properties_Manage
             database_idx = dataset_properties.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier)
             assert feature_vectors_database[database_idx,0] == graph_id and feature_vectors_database[database_idx,1] == vertex_id
             vector = feature_vectors_database[database_idx, 2:]
-            vector = transform_feature_vector(vector = vector, normalize = normalize, lsa = lsa)
+            vector = transform_feature_vector(vector = vector, normalize = normalize, pca = pca)
             feature_vectors_graph.append(vector)
     else:
         # feature vectors have to be computed
@@ -247,7 +247,7 @@ def get_cluster_ids(graph_id: int, dataset_properties: Dataset_Properties_Manage
             sp_features = SP_graph_features(label_alphabet = dataset_properties.properties["label_alphabet"], distances_alphabet = distances_alphabet)
             for vertex_id in range(num_vertices):
                 feature, _ = compute_single_k_disk_sp_feature_vector(graph = graph, vertex_id = vertex_id, k = k, sp_features = sp_features)
-                feature = transform_feature_vector(vector = feature, normalize = normalize, lsa = lsa)
+                feature = transform_feature_vector(vector = feature, normalize = normalize, pca = pca)
                 feature_vectors_graph.append(feature)
 
         elif feature_identifier["id"] == "r-s-ring_sp":
@@ -258,7 +258,7 @@ def get_cluster_ids(graph_id: int, dataset_properties: Dataset_Properties_Manage
             sp_features = SP_graph_features(label_alphabet = dataset_properties.properties["label_alphabet"], distances_alphabet = distances_alphabet)
             for vertex_id in range(num_vertices):
                 feature, _ = compute_single_r_s_ring_sp_feature_vector(graph = graph, vertex_id = vertex_id, r = r, s = s, sp_features = sp_features)
-                feature = transform_feature_vector(vector = feature, normalize = normalize, lsa = lsa)
+                feature = transform_feature_vector(vector = feature, normalize = normalize, pca = pca)
                 feature_vectors_graph.append(feature)
 
         elif feature_identifier["id"] == "vertex_sp":
@@ -267,7 +267,7 @@ def get_cluster_ids(graph_id: int, dataset_properties: Dataset_Properties_Manage
             sp_features = SP_vertex_features(label_alphabet = dataset_properties.properties["label_alphabet"], distances_alphabet = distances_alphabet)
             feature_vectors_graph, _ = compute_vertex_sp_feature_vectors(graph = graph, sp_features = sp_features)
             for feature in feature_vectors_graph:
-                feature = transform_feature_vector(vector = feature, normalize = normalize, lsa = lsa)
+                feature = transform_feature_vector(vector = feature, normalize = normalize, pca = pca)
             
     return get_cluster_ids_from_feature_vectors(feature_vectors = feature_vectors_graph, cluster_alg = algorithm, centroids = centroids, medoids = medoids)
     

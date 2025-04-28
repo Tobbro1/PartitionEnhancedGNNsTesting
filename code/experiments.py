@@ -60,7 +60,7 @@ class Experiment_Manager():
         self.s = []
         self.is_vertex_sp_features = False
         self.num_clusters = []
-        self.lsa_dims = []
+        self.pca_dims = []
         self.min_cluster_sizes = []
         self.num_layers = []
         self.hidden_channels = []
@@ -69,7 +69,7 @@ class Experiment_Manager():
         self.lrs = []
 
         # Note for hyperparameter optimization: first the gnn props are trained without clustering (num_layers, hidden_channels, batch_size, num_epochs, lr)
-        #                                       then, the clustering parameters are trained with the learned gnn parameters (k, r, s, num_clusters, lsa_dim)
+        #                                       then, the clustering parameters are trained with the learned gnn parameters (k, r, s, num_clusters, pca_dim)
 
         # Data collected when runninng the experiments
         # collects:
@@ -90,7 +90,7 @@ class Experiment_Manager():
     # base_model: one of 'gin' or 'gcn'
     # dataset_str: one of 'CSL' or h-Prox for any integer h from [1,3,5,8,10]
     def setup_experiments(self, dataset_str: str, base_model: str = 'gin', is_lovasz_feature: bool = False, lo_idx_str: str = "", k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
-                          num_clusters: List[int] = None, lsa_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
+                          num_clusters: List[int] = None, pca_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
                           hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, run_classical_exp = False, max_patience: Optional[int] = None):
 
         self.gnn = GNN_Manager()
@@ -101,7 +101,7 @@ class Experiment_Manager():
         self.s = s
         self.is_vertex_sp_features = is_vertex_sp_features
         self.num_clusters = num_clusters
-        self.lsa_dims = lsa_dims
+        self.pca_dims = pca_dims
         self.min_cluster_sizes = min_cluster_sizes
         self.num_layers = num_layers
         self.hidden_channels = hidden_channels
@@ -368,7 +368,7 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
                                                                                                                                                     hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                     n_epoch = best_classic_n_epoch, lr = best_classic_lr, lo_idx_str = self.lo_idx_str)
 
@@ -448,7 +448,7 @@ class Experiment_Manager():
 
         data["res"]["hyperparameter"]["best_num_clusters"] = best_num_clusters
         data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
-        data["res"]["hyperparameter"]["best_lsa_dim"] = best_lsa_dim
+        data["res"]["hyperparameter"]["best_pca_dim"] = best_pca_dim
         data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
 
         print(f'---   Val perf: mean: {val_mean}; std: {val_std}   ---')
@@ -697,7 +697,7 @@ class Experiment_Manager():
         # decide whether k-disks, r-s-rings or vertex_sp_features are used.
         if self.k is not None and len(self.k) > 0:
             # Use k-disks
-            num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.k)
+            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.k)
             for k in self.k:
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_lo_features'))
@@ -722,7 +722,7 @@ class Experiment_Manager():
 
         elif self.r is not None and self.s is not None and len(self.r) > 0 and len(self.s) == len(self.r):
             # Use r-s-rings
-            num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.r)
+            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.r)
             for idx in range(len(self.r)):
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_lo_features'))
@@ -746,7 +746,7 @@ class Experiment_Manager():
                         metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
 
         elif self.is_vertex_sp_features:
-            num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes)
+            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes)
             vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'vertex_SP_features'))
             if self.dataset_str == "ogbg-molhiv":
                 metadata_filenames.append(f"MOLHIV_vertex_SP_features_metadata.json")
@@ -770,7 +770,7 @@ class Experiment_Manager():
         data["res"]["best_experiment_idx"] = -1
         data["res"]["best_features_path"] = ""
         data["res"]["best_num_clusters"] = -1
-        data["res"]["best_lsa_dim"] = -1
+        data["res"]["best_pca_dim"] = -1
         data["res"]["best_min_cluster_size"] = -1
         # Set in the parent method
         data["res"]["val_perf"] = {}
@@ -798,7 +798,7 @@ class Experiment_Manager():
         best_features_metadata_filename = ""
         best_clustering_metadata_path = ""
         best_num_clusters = 0
-        best_lsa_dim = 0
+        best_pca_dim = 0
         best_min_cluster_size = 0
         best_val_perf_experiment_idx = 0
         best_max_num_clusters = 0
@@ -814,7 +814,7 @@ class Experiment_Manager():
 
         cur_experiment_idx = 0
         for n_cluster in self.num_clusters:
-            for lsa_d in self.lsa_dims:
+            for pca_d in self.pca_dims:
                 for min_cluster_size in self.min_cluster_sizes:
                     for path_idx, vertex_feature_path in enumerate(vertex_feature_paths):
                         experiment_start = time.time()
@@ -850,17 +850,17 @@ class Experiment_Manager():
                         dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
                         clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
 
-                        # LSA
+                        # PCA
                         working_path = osp.join(vertex_feature_path, 'cluster-gnn')
 
-                        if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
-                            lsa_filename = f'{lsa_d}_dim_lsa.pkl'
-                            clusterer.generate_lsa(target_dimensions = lsa_d, write_lsa_path = working_path, write_lsa_filename = lsa_filename)
-                            clusterer.apply_lsa_to_dataset()
+                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                            pca_filename = f'{pca_d}_dim_pca.pkl'
+                            clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
+                            clusterer.apply_pca_to_dataset()
 
                         # k-means
-                        if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
-                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{lsa_d}-lsa_centroids.txt'
+                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
                         else:
                             centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
 
@@ -871,8 +871,8 @@ class Experiment_Manager():
 
                         num_clusters = centroids.shape[0]
 
-                        if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
-                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{lsa_d}-lsa_cluster_metadata.json'
+                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
                         else:
                             metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
 
@@ -988,7 +988,7 @@ class Experiment_Manager():
                             best_features_path = vertex_feature_path
                             best_features_metadata_filename = metadata_filenames[path_idx]
                             best_min_cluster_size = min_cluster_size
-                            best_lsa_dim = lsa_d
+                            best_pca_dim = pca_d
                             best_num_clusters = n_cluster
                             best_clustering_metadata_path = cluster_metadata_path
                             best_val_perf_experiment_idx = cur_experiment_idx
@@ -1010,7 +1010,7 @@ class Experiment_Manager():
         data["res"]["best_features_path"] = best_features_path
         data["res"]["best_feature_metadata_filename"] = best_features_metadata_filename
         data["res"]["best_num_clusters"] = best_num_clusters
-        data["res"]["best_lsa_dim"] = best_lsa_dim
+        data["res"]["best_pca_dim"] = best_pca_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
         data["res"]["max_num_clusters"] = best_max_num_clusters
 
@@ -1026,7 +1026,7 @@ class Experiment_Manager():
         data["times"]["rerun_avg"] = avg_rerun_time_overall
         data["times"]["epoch_avg"] = avg_epoch_time_overall
 
-        return data, best_val_perfs, best_test_perfs, best_features_path, best_features_metadata_filename, best_clustering_metadata_path, best_max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size
+        return data, best_val_perfs, best_test_perfs, best_features_path, best_features_metadata_filename, best_clustering_metadata_path, best_max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size
 
 
     # Schedules multiple experiments
@@ -1095,7 +1095,7 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
                                                                                                                                                        hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                        n_epoch = best_classic_n_epoch, lr = best_classic_lr, splits = splits, loss_func = loss_func, lo_idx_str = self.lo_idx_str)
 
@@ -1174,7 +1174,7 @@ class Experiment_Manager():
 
         data["res"]["hyperparameter"]["best_num_clusters"] = best_num_clusters
         data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
-        data["res"]["hyperparameter"]["best_lsa_dim"] = best_lsa_dim
+        data["res"]["hyperparameter"]["best_pca_dim"] = best_pca_dim
         data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
 
         print(f'---   Val acc: mean: {val_mean}; std: {val_std}   ---')
@@ -1469,7 +1469,7 @@ class Experiment_Manager():
 
         return avg_val_acc, rerun_data, avg_test_acc, avg_time_rerun, avg_time_epoch_overall
     
-    # Optimizing the hyperparameters used for clustering: num_clusters, lsa_dim, min_cluster_size, k/r&s
+    # Optimizing the hyperparameters used for clustering: num_clusters, pca_dim, min_cluster_size, k/r&s
     def run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(self, clusterer: Vertex_Partition_Clustering, n_layers: int, hidden_channels: int, s_batch: int, n_epoch: int, lr: float, splits: Dict, loss_func, lo_idx_str: str = "") -> Tuple[Dict, str, Dict, int, int, int]:
 
         data = {}
@@ -1482,7 +1482,7 @@ class Experiment_Manager():
         # decide whether k-disks, r-s-rings or vertex_sp_features are used.
         if self.k is not None and len(self.k) > 0:
             # Use k-disks
-            num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.k)
+            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.k)
             for k in self.k:
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_lo_features'))
@@ -1499,7 +1499,7 @@ class Experiment_Manager():
 
         elif self.r is not None and self.s is not None and len(self.r) > 0 and len(self.s) == len(self.r):
             # Use r-s-rings
-            num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes) * len(self.r)
+            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.r)
             for idx in range(len(self.r)):
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_lo_features'))
@@ -1515,7 +1515,7 @@ class Experiment_Manager():
                         metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
 
         elif self.is_vertex_sp_features:
-            num_experiments = len(self.num_clusters) * len(self.lsa_dims) * len(self.min_cluster_sizes)
+            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes)
             vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'vertex_SP_features'))
             if self.dataset_str == "CSL":
                 metadata_filenames.append(f"CSL_vertex_SP_features_metadata.json")
@@ -1535,7 +1535,7 @@ class Experiment_Manager():
         data["res"]["best_experiment_idx"] = -1
         data["res"]["best_features_path"] = ""
         data["res"]["best_num_clusters"] = -1
-        data["res"]["best_lsa_dim"] = -1
+        data["res"]["best_pca_dim"] = -1
         data["res"]["best_min_cluster_size"] = -1
 
         data["res"]["val_acc"] = {}
@@ -1564,7 +1564,7 @@ class Experiment_Manager():
         best_features_metadata_filename = ""
         best_clustering_metadata_paths = {} # For each experiment we store the cluster results for each fold
         best_num_clusters = 0
-        best_lsa_dim = 0
+        best_pca_dim = 0
         best_min_cluster_size = 0
         best_val_acc_experiment_idx = 0
         best_max_num_clusters = 0
@@ -1583,7 +1583,7 @@ class Experiment_Manager():
 
         
         for n_cluster in self.num_clusters:
-            for lsa_d in self.lsa_dims:
+            for pca_d in self.pca_dims:
                 for min_cluster_size in self.min_cluster_sizes:
                     for path_idx, vertex_feature_path in enumerate(vertex_feature_paths):
                         # Run the optimization, the different feature datasets are defined by the vertex_feature_path
@@ -1655,17 +1655,17 @@ class Experiment_Manager():
                             clusterer.set_split(split = train_indices, split_prop = split_prop)
                             # clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
 
-                            # LSA
+                            # PCA
                             working_path = osp.join(vertex_feature_path, 'cluster-gnn', f'{idx}-split')
 
-                            if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
-                                lsa_filename = f'{lsa_d}_dim_lsa.pkl'
-                                clusterer.generate_lsa(target_dimensions = lsa_d, write_lsa_path = working_path, write_lsa_filename = lsa_filename)
-                                clusterer.apply_lsa_to_dataset()
+                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                pca_filename = f'{pca_d}_dim_pca.pkl'
+                                clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
+                                clusterer.apply_pca_to_dataset()
 
                             # k-means
-                            if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
-                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{lsa_d}-lsa_centroids.txt'
+                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
                             else:
                                 centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
 
@@ -1678,8 +1678,8 @@ class Experiment_Manager():
                             if num_clusters > max_num_clusters:
                                 max_num_clusters = num_clusters
 
-                            if lsa_d > 0 and lsa_d < clusterer.dataset.shape[1]:
-                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{lsa_d}-lsa_cluster_metadata.json'
+                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
                             else:
                                 metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
 
@@ -1731,7 +1731,7 @@ class Experiment_Manager():
                         if avg_val_acc > best_avg_val_acc:
                             best_avg_val_acc = avg_val_acc
                             best_min_cluster_size = min_cluster_size
-                            best_lsa_dim = lsa_d
+                            best_pca_dim = pca_d
                             best_num_clusters = n_cluster
                             best_features_path = vertex_feature_path
                             best_features_metadata_filename = metadata_filenames[path_idx]
@@ -1757,7 +1757,7 @@ class Experiment_Manager():
         data["res"]["best_features_path"] = best_features_path
         data["res"]["best_feature_metadata_filename"] = best_features_metadata_filename
         data["res"]["best_num_clusters"] = best_num_clusters
-        data["res"]["best_lsa_dim"] = best_lsa_dim
+        data["res"]["best_pca_dim"] = best_pca_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
         data["res"]["max_num_clusters"] = best_max_num_clusters
 
@@ -1775,7 +1775,7 @@ class Experiment_Manager():
         data["times"]["rerun_avg"] = avg_rerun_time_overall
         data["times"]["epoch_avg"] = avg_epoch_time_overall
 
-        return data, best_val_accs, best_test_accs, best_features_path, best_features_metadata_filename, best_clustering_metadata_paths, best_max_num_clusters, best_num_clusters, best_lsa_dim, best_min_cluster_size
+        return data, best_val_accs, best_test_accs, best_features_path, best_features_metadata_filename, best_clustering_metadata_paths, best_max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size
 
     def get_data(self) -> Dict:
         return deepcopy(self.data)
@@ -1911,7 +1911,7 @@ class Experiment_Manager():
 
 #         vertex_feature_metadata = util.read_metadata_file(path = osp.join(root_path, vertex_feature_metadata_path))
 
-#         # create a clustering with lsa
+#         # create a clustering with pca
 #         clusterer = Vertex_Partition_Clustering(absolute_path_prefix = root_path)
 #         feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
 #         dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
@@ -1930,11 +1930,11 @@ class Experiment_Manager():
 
 #         clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split_prop = split_prop, normalize = normalize)
         
-#         # LSA
-#         lsa_target_dim = 2
-#         lsa_filename = f'{lsa_target_dim}_dim_lsa.pkl'
-#         clusterer.generate_lsa(target_dimensions = lsa_target_dim, write_lsa_path = working_path, write_lsa_filename = lsa_filename)
-#         clusterer.apply_lsa_to_dataset()
+#         # PCA
+#         pca_target_dim = 2
+#         pca_filename = f'{pca_target_dim}_dim_pca.pkl'
+#         clusterer.generate_pca(target_dimensions = pca_target_dim, write_pca_path = working_path, write_pca_filename = pca_filename)
+#         clusterer.apply_pca_to_dataset()
 
 #         # k-means
 #         mbk_n_clusters = 6

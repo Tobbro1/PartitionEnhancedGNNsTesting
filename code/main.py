@@ -49,7 +49,7 @@ def gen_experiment_config_file(root_path: str) -> None:
     config["dataset"]["normalize_vertex_features"] = False
     config["hyperparameters"] = {}
     config["hyperparameters"]["num_clusters"] = ["---   List of the numbers of clusters that will be evaluated   ---"]
-    config["hyperparameters"]["lsa_dims"] = ["---   List of the numbers of lsa dimensions that will be evaluated. NOTE: values smaller than 1 mean no dimensionality reduction is performed   ---"]
+    config["hyperparameters"]["pca_dims"] = ["---   List of the numbers of pca dimensions that will be evaluated. NOTE: values smaller than 1 mean no dimensionality reduction is performed   ---"]
     config["hyperparameters"]["min_cluster_size"] = ["---   List of the minimum sizes of clusters that will be evaluated   ---"]
     config["hyperparameters"]["num_layers"] = ["---   List of the number of layers of gnns that will be evaluated   ---"]
     config["hyperparameters"]["num_hidden_channels"] = ["---   List of the number hidden dimensions of gnns that will be evaluated   ---"]
@@ -74,7 +74,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     s = None
     is_vertex_sp_features = False
     num_clusters = None
-    lsa_dims = None
+    pca_dims = None
     min_cluster_sizes = None
     num_layers = None
     hidden_channels = None
@@ -223,10 +223,10 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
             assert len(value) > 0
             assert [x > 0 for x in value]
             num_clusters = value
-        elif key == "lsa_dims":
+        elif key == "pca_dims":
             assert len(value) > 0
             assert [x > 0 for x in value]
-            lsa_dims = value
+            pca_dims = value
         elif key == "min_cluster_size":
             assert len(value) > 0
             assert [x > 0 for x in value]
@@ -261,7 +261,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
 
     try:
         manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
-                                    lsa_dims = lsa_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
+                                    pca_dims = pca_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
                                     num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, run_classical_exp = run_classical_exp, max_patience = constants.max_patience, lo_idx_str = lo_idx_str)
         
         manager.run_experiments()

@@ -67,8 +67,8 @@ class Vertex_Partition_Clustering():
         self.num_vertices = -1
         self.num_features = -1
 
-        self.lsa = None
-        self.draw_lsa = None
+        self.pca = None
+        self.draw_pca = None
 
         # Metadata collected while clustering
         # dataset_prop: path, desc, normalized
@@ -76,7 +76,7 @@ class Vertex_Partition_Clustering():
         #                 identifier: id of the clustering algorithm (from the enum)
         #                 metric: short string
         # datasplit_prop: desc, split_mode (CV/fixed), num_samples, split_idx (if CV)
-        # lsa: lsa_used,
+        # pca: pca_used,
         #      path (of pickle file) (if used)
         #      result_prop: explained_variances (for each component, var and var_ratio), num_features_seen, time
         #      config (if used): num_components, algorithm (as str; arpack or randomized), num_iter (if random), num_oversamples (if random), 
@@ -101,23 +101,23 @@ class Vertex_Partition_Clustering():
         self.metadata["data_split"]["split_mode"] = ""
         self.metadata["data_split"]["num_samples"] = ""
         # self.metadata["data_split"]["split_idx"] = -1
-        self.metadata["lsa"] = {}
-        self.metadata["lsa"]["lsa_used"] = False
-        # if lsa_used
-        # self.metadata["lsa"]["path"] = ""
-        # self.metadata["lsa"]["result_prop"] = {}
-        # self.metadata["lsa"]["result_prop"]["num_features_seen"] = -1
-        # self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
+        self.metadata["pca"] = {}
+        self.metadata["pca"]["pca_used"] = False
+        # if pca_used
+        # self.metadata["pca"]["path"] = ""
+        # self.metadata["pca"]["result_prop"] = {}
+        # self.metadata["pca"]["result_prop"]["num_features_seen"] = -1
+        # self.metadata["pca"]["result_prop"]["explained_variances"] = {}
         # # foreach component: { variance, var_ratio } 
-        # self.metadata["lsa"]["config"] = {}
-        # self.metadata["lsa"]["config"]["algorithm"] = ""
-        # self.metadata["lsa"]["config"]["num_components"] = -1
+        # self.metadata["pca"]["config"] = {}
+        # self.metadata["pca"]["config"]["algorithm"] = ""
+        # self.metadata["pca"]["config"]["num_components"] = -1
         # # if randomized:
-        # # self.metadata["lsa"]["config"]["num_iter"] = -1
-        # # self.metadata["lsa"]["config"]["num_oversamples"] = -1
-        # # self.metadata["lsa"]["config"]["power_iteration_normalizer"] = ""
+        # # self.metadata["pca"]["config"]["num_iter"] = -1
+        # # self.metadata["pca"]["config"]["num_oversamples"] = -1
+        # # self.metadata["pca"]["config"]["power_iteration_normalizer"] = ""
         # # if arpack:
-        # # self.metadata["lsa"]["config"]["tol"] = -1.0
+        # # self.metadata["pca"]["config"]["tol"] = -1.0
         self.metadata["result_prop"] = {}
         self.metadata["result_prop"]["desc"] = ""
         self.metadata["result_prop"]["path"] = ""
@@ -134,7 +134,7 @@ class Vertex_Partition_Clustering():
         self.metadata["times"] = {}
         self.metadata["times"]["read_from_disk"] = -1.0
         self.metadata["times"]["write_on_disk"] = -1.0
-        # self.metadata["times"]["lsa_comp"] = -1.0 # if lsa
+        # self.metadata["times"]["pca_comp"] = -1.0 # if pca
         self.metadata["times"]["clustering"] = -1.0
         self.metadata["config"] = {}
         # # if k_means
@@ -157,8 +157,8 @@ class Vertex_Partition_Clustering():
         self.num_vertices = -1
         self.num_features = -1
 
-        self.lsa = None
-        self.draw_lsa = None
+        self.pca = None
+        self.draw_pca = None
 
         # Metadata collected while clustering
         # dataset_prop: path, desc, normalized
@@ -166,7 +166,7 @@ class Vertex_Partition_Clustering():
         #                 identifier: id of the clustering algorithm (from the enum)
         #                 metric: short string
         # datasplit_prop: desc, split_mode (CV/fixed), num_samples, split_idx (if CV)
-        # lsa: lsa_used,
+        # pca: pca_used,
         #      path (of pickle file) (if used)
         #      result_prop: explained_variances (for each component, var and var_ratio), num_features_seen, time
         #      config (if used): num_components, algorithm (as str; arpack or randomized), num_iter (if random), num_oversamples (if random), 
@@ -190,23 +190,23 @@ class Vertex_Partition_Clustering():
         self.metadata["data_split"]["split_mode"] = ""
         self.metadata["data_split"]["num_samples"] = ""
         # self.metadata["data_split"]["split_idx"] = -1
-        self.metadata["lsa"] = {}
-        self.metadata["lsa"]["lsa_used"] = False
-        # if lsa_used
-        # self.metadata["lsa"]["path"] = ""
-        # self.metadata["lsa"]["result_prop"] = {}
-        # self.metadata["lsa"]["result_prop"]["num_features_seen"] = -1
-        # self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
+        self.metadata["pca"] = {}
+        self.metadata["pca"]["pca_used"] = False
+        # if pca_used
+        # self.metadata["pca"]["path"] = ""
+        # self.metadata["pca"]["result_prop"] = {}
+        # self.metadata["pca"]["result_prop"]["num_features_seen"] = -1
+        # self.metadata["pca"]["result_prop"]["explained_variances"] = {}
         # # foreach component: { variance, var_ratio } 
-        # self.metadata["lsa"]["config"] = {}
-        # self.metadata["lsa"]["config"]["algorithm"] = ""
-        # self.metadata["lsa"]["config"]["num_components"] = -1
+        # self.metadata["pca"]["config"] = {}
+        # self.metadata["pca"]["config"]["algorithm"] = ""
+        # self.metadata["pca"]["config"]["num_components"] = -1
         # # if randomized:
-        # # self.metadata["lsa"]["config"]["num_iter"] = -1
-        # # self.metadata["lsa"]["config"]["num_oversamples"] = -1
-        # # self.metadata["lsa"]["config"]["power_iteration_normalizer"] = ""
+        # # self.metadata["pca"]["config"]["num_iter"] = -1
+        # # self.metadata["pca"]["config"]["num_oversamples"] = -1
+        # # self.metadata["pca"]["config"]["power_iteration_normalizer"] = ""
         # # if arpack:
-        # # self.metadata["lsa"]["config"]["tol"] = -1.0
+        # # self.metadata["pca"]["config"]["tol"] = -1.0
         self.metadata["result_prop"] = {}
         self.metadata["result_prop"]["desc"] = ""
         self.metadata["result_prop"]["path"] = ""
@@ -223,8 +223,8 @@ class Vertex_Partition_Clustering():
         self.metadata["times"] = {}
         self.metadata["times"]["read_from_disk"] = -1.0
         self.metadata["times"]["write_on_disk"] = -1.0
-        # self.metadata["times"]["lsa_comp"] = -1.0 # if lsa
-        # self.metadata["times"]["lsa_application"] = -1.0
+        # self.metadata["times"]["pca_comp"] = -1.0 # if pca
+        # self.metadata["times"]["pca_application"] = -1.0
         self.metadata["times"]["clustering"] = -1.0
         self.metadata["config"] = {}
         # # if k_means
@@ -239,13 +239,13 @@ class Vertex_Partition_Clustering():
         # self.metadata["config"]["tol"] = -1.0
 
     # Returns a tuple of the learned components and the ratio of their explained variance
-    def generate_lsa(self, target_dimensions: int, write_lsa_path: Optional[str] = None, write_lsa_filename: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def generate_pca(self, target_dimensions: int, write_pca_path: Optional[str] = None, write_pca_filename: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
 
         t0 = time.time()
 
-        # log metadata for lsa
-        if write_lsa_filename is not None:
-            self.metadata["lsa"]["path"] = ""
+        # log metadata for pca
+        if write_pca_filename is not None:
+            self.metadata["pca"]["path"] = ""
 
         algorithm = 'arpack'
         tol = 0.0
@@ -253,91 +253,86 @@ class Vertex_Partition_Clustering():
         n_oversamples = 10 # The number of oversamples for randomized SVD solver; default: 10
         power_iteration_normalizer = 'auto' # Power iteration normalizer for randomized SVD solver; default: 'auto'
 
-        self.metadata["lsa"]["result_prop"] = {}
-        self.metadata["lsa"]["config"] = {}
-        self.metadata["lsa"]["config"]["algorithm"] = algorithm
-        self.metadata["lsa"]["config"]["num_components"] = target_dimensions
+        self.metadata["pca"]["result_prop"] = {}
+        self.metadata["pca"]["config"] = {}
+        self.metadata["pca"]["config"]["algorithm"] = algorithm
+        self.metadata["pca"]["config"]["num_components"] = target_dimensions
 
-        if algorithm == 'randomized':
-            self.metadata["lsa"]["config"]["num_iter"] = n_iter
-            self.metadata["lsa"]["config"]["num_oversamples"] = n_oversamples
-            self.metadata["lsa"]["config"]["power_iteration_normalizer"] = power_iteration_normalizer
-        elif algorithm == 'arpack':
-            self.metadata["lsa"]["config"]["tol"] = tol
+        self.metadata["pca"]["config"]["tol"] = tol
 
-        # n_components is the number of principal components that are utilised, thus the number of dimensions after the LSA
-        self.lsa = TruncatedSVD(n_components = target_dimensions, algorithm = algorithm, n_iter = n_iter, n_oversamples = n_oversamples, power_iteration_normalizer = power_iteration_normalizer, tol = tol)
-        self.lsa.fit(self.original_dataset)
+        # n_components is the number of principal components that are utilised, thus the number of dimensions after the PCA
+        self.pca = TruncatedSVD(n_components = target_dimensions, algorithm = algorithm, n_iter = n_iter, n_oversamples = n_oversamples, power_iteration_normalizer = power_iteration_normalizer, tol = tol)
+        self.pca.fit(self.original_dataset)
 
-        self.metadata["lsa"]["result_prop"]["num_features_seen"] = self.lsa.n_features_in_
-        self.metadata["lsa"]["result_prop"]["explained_variances"] = {}
+        self.metadata["pca"]["result_prop"]["num_features_seen"] = self.pca.n_features_in_
+        self.metadata["pca"]["result_prop"]["explained_variances"] = {}
         sum_explained_var_ratio = 0.0
-        for idx in range(self.lsa.explained_variance_.shape[0]):
-            self.metadata["lsa"]["result_prop"]["explained_variances"][idx] = { "var" : self.lsa.explained_variance_[idx], "var_ratio" : self.lsa.explained_variance_ratio_[idx] }
-            sum_explained_var_ratio += self.lsa.explained_variance_ratio_[idx]
-        self.metadata["lsa"]["result_prop"]["explained_variances"]["total_ratio"] = sum_explained_var_ratio
+        for idx in range(self.pca.explained_variance_.shape[0]):
+            self.metadata["pca"]["result_prop"]["explained_variances"][idx] = { "var" : self.pca.explained_variance_[idx], "var_ratio" : self.pca.explained_variance_ratio_[idx] }
+            sum_explained_var_ratio += self.pca.explained_variance_ratio_[idx]
+        self.metadata["pca"]["result_prop"]["explained_variances"]["total_ratio"] = sum_explained_var_ratio
 
-        if write_lsa_path is not None:
-            # Store the lsa object for potential later use
-            assert write_lsa_filename is not None
+        if write_pca_path is not None:
+            # Store the pca object for potential later use
+            assert write_pca_filename is not None
 
-            path = osp.join(self.absolute_path_prefix, write_lsa_path)
+            path = osp.join(self.absolute_path_prefix, write_pca_path)
             if not osp.exists(path):
                 os.makedirs(path)
 
-            path = osp.join(path, write_lsa_filename)
+            path = osp.join(path, write_pca_filename)
             if not osp.exists(path):
                 open(path, 'wb').close()
 
             with open(path, 'wb') as file:
-                pickle.dump(obj = self.lsa, file = file)
+                pickle.dump(obj = self.pca, file = file)
 
-            self.metadata["lsa"]["path"] = osp.join(write_lsa_path, write_lsa_filename)
+            self.metadata["pca"]["path"] = osp.join(write_pca_path, write_pca_filename)
 
-        self.metadata["times"]["lsa_comp"] = time.time() - t0
+        self.metadata["times"]["pca_comp"] = time.time() - t0
 
-        return self.lsa.components_, self.lsa.explained_variance_ratio_
+        return self.pca.components_, self.pca.explained_variance_ratio_
 
-    def apply_lsa_to_dataset(self) -> None:
+    def apply_pca_to_dataset(self) -> None:
         if self.dataset is None or self.num_vertices < 1:
             raise ValueError("Dataset invalid")
         
-        if self.lsa is None:
-            raise ValueError("Initialize LSA before applying")
+        if self.pca is None:
+            raise ValueError("Initialize PCA before applying")
         
         t0 = time.time()
         
-        self.metadata["lsa"]["lsa_used"] = True
+        self.metadata["pca"]["pca_used"] = True
 
-        self.dataset = self.lsa.transform(self.original_dataset[self.split,:])
+        self.dataset = self.pca.transform(self.original_dataset[self.split,:])
 
-        self.metadata["times"]["lsa_application"] = time.time() - t0
+        self.metadata["times"]["pca_application"] = time.time() - t0
 
     # A PCA to two dimensions used for visualization
     # Returns a tuple of the learned components and the ratio of their explained variance
     def generate_draw_pca(self) -> Tuple[np.ndarray, np.ndarray]:
 
-        self.draw_lsa = TruncatedSVD(n_components = 2, algorithm = 'arpack')
-        self.draw_lsa.fit(self.dataset)
+        self.draw_pca = TruncatedSVD(n_components = 2, algorithm = 'arpack')
+        self.draw_pca.fit(self.dataset)
 
-        return self.draw_lsa.components_, self.draw_lsa.explained_variance_ratio_
+        return self.draw_pca.components_, self.draw_pca.explained_variance_ratio_
 
     # This method draws the dataset colored by their assigned cluster according to the label parameter. This makes use of a PCA to two dimensions
     # The grid_granularity parameter is used when visualizing centroid based methods. Note that the grid is made between the smallest and highest values for the PCA transformed vectors which might lead to huge memroy requirements in case of large ranges and small granularity
     # labels is used to visualize optics results
     def draw_clustering_data(self, num_figure: int, title: str, cluster_alg: Clustering_Algorithm, labels: np.array, centroids: Optional[np.array] = None, grid_granularity: Optional[int] = 2, medoids: Optional[np.array] = None) -> None:
 
-        if self.draw_lsa is None:
+        if self.draw_pca is None:
             self.generate_draw_pca()
         
-        reduced_data = self.draw_lsa.transform(self.dataset)
+        reduced_data = self.draw_pca.transform(self.dataset)
 
         if cluster_alg == Clustering_Algorithm.k_means:
             # k-means, code taken from https://scikit-learn.org/stable/auto_examples/cluster/plot_kmeans_digits.html#sphx-glr-auto-examples-cluster-plot-kmeans-digits-py
             assert centroids is not None
             assert grid_granularity is not None
 
-            centroids = self.draw_lsa.transform(centroids)
+            centroids = self.draw_pca.transform(centroids)
 
             h = grid_granularity
 
@@ -359,8 +354,8 @@ class Vertex_Partition_Clustering():
             plt.title(title)
             plt.xlim(x_min, x_max)
             plt.ylim(y_min, y_max)
-            plt.xlabel(f"Component 1: {self.draw_lsa.explained_variance_ratio_[0]}")
-            plt.ylabel(f"Component 2: {self.draw_lsa.explained_variance_ratio_[1]}")
+            plt.xlabel(f"Component 1: {self.draw_pca.explained_variance_ratio_[0]}")
+            plt.ylabel(f"Component 2: {self.draw_pca.explained_variance_ratio_[1]}")
             plt.xticks(())
             plt.yticks(())
 
@@ -386,8 +381,8 @@ class Vertex_Partition_Clustering():
             plt.xlim(x_min, x_max)
             plt.ylim(y_min, y_max)
 
-            plt.xlabel(f"Component 1: {self.draw_lsa.explained_variance_ratio_[0]}")
-            plt.ylabel(f"Component 2: {self.draw_lsa.explained_variance_ratio_[1]}")
+            plt.xlabel(f"Component 1: {self.draw_pca.explained_variance_ratio_[0]}")
+            plt.ylabel(f"Component 2: {self.draw_pca.explained_variance_ratio_[1]}")
 
             for c in range(num_cluster):
                 class_data = reduced_data[labels == c]
@@ -401,7 +396,7 @@ class Vertex_Partition_Clustering():
             assert medoids is not None
 
             num_cluster = np.unique(labels)
-            medoids = self.draw_lsa.transform(medoids)
+            medoids = self.draw_pca.transform(medoids)
 
             # Generate colors based on the number of clusters found for plotting
             hsv_tuples = [(x*1.0/num_cluster, 0.5, 0.5) for x in range(num_cluster)]
@@ -418,8 +413,8 @@ class Vertex_Partition_Clustering():
             plt.xlim(x_min, x_max)
             plt.ylim(y_min, y_max)
 
-            plt.xlabel(f"Component 1: {self.draw_lsa.explained_variance_ratio_[0]}")
-            plt.ylabel(f"Component 2: {self.draw_lsa.explained_variance_ratio_[1]}")
+            plt.xlabel(f"Component 1: {self.draw_pca.explained_variance_ratio_[0]}")
+            plt.ylabel(f"Component 2: {self.draw_pca.explained_variance_ratio_[1]}")
 
             for c in range(num_cluster):
                 class_data = reduced_data[labels == c]
