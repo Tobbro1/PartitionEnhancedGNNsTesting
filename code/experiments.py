@@ -15,13 +15,13 @@ import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Dataset
 
-from clustering import Clustering_Algorithm, Vertex_Partition_Clustering
+from clustering import Vertex_Partition_Clustering
 import util
 import gnn_utils
 from CSL_dataset import CSL_Dataset
 from Proximity_dataset import ProximityDataset
 import constants
-from partition_gnns import GNN_Manager, Partition_enhanced_GIN, Partition_enhanced_GCN
+from partition_gnns import GNN_Manager
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 
 # Manages the experiments and provides functionality to run them
@@ -68,6 +68,9 @@ class Experiment_Manager():
         self.num_epochs = []
         self.lrs = []
 
+        self.classical_gnn_hyperparameter_experiment_res_path = None
+        self.clustering_hyperparameter_experiment_res_path = None
+
         # Note for hyperparameter optimization: first the gnn props are trained without clustering (num_layers, hidden_channels, batch_size, num_epochs, lr)
         #                                       then, the clustering parameters are trained with the learned gnn parameters (k, r, s, num_clusters, pca_dim)
 
@@ -91,7 +94,8 @@ class Experiment_Manager():
     # dataset_str: one of 'CSL' or h-Prox for any integer h from [1,3,5,8,10]
     def setup_experiments(self, dataset_str: str, base_model: str = 'gin', is_lovasz_feature: bool = False, lo_idx_str: str = "", k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
                           num_clusters: List[int] = None, pca_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
-                          hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, run_classical_exp = False, max_patience: Optional[int] = None):
+                          hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, exp_mode: int = -1, max_patience: Optional[int] = None,
+                          prev_res_path: Optional[str] = None):
 
         self.gnn = GNN_Manager()
 
@@ -127,33 +131,67 @@ class Experiment_Manager():
         
         self.model_str = base_model
 
+        assert exp_mode > -1
+
         if dataset_str == 'ogbg-ppa':
             self.dataset_path = osp.join('data', 'OGB', 'PPA')
-            if run_classical_exp:
+            if exp_mode == 0: # classical
                 self.run_experiments = self.run_classical_ogb_experiments
-            else:
+            elif exp_mode == 1: # clustering
+                assert prev_res_path is not None
+                self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_clustering_ogb_experiment
+            elif exp_mode == 2: # enhanced GNN
+                assert prev_res_path is not None
+                self.clustering_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_ogb_enhanced_gnn_experiment
+            elif exp_mode == 3: # full
                 self.run_experiments = self.run_ogb_experiments
             self.criterion = torch.nn.CrossEntropyLoss(reduction = 'mean')
         elif dataset_str == 'ogbg-molhiv':
             self.dataset_path = osp.join('data', 'OGB', 'MOL_HIV')
-            if run_classical_exp:
+            if exp_mode == 0: # classical
                 self.run_experiments = self.run_classical_ogb_experiments
-            else:
+            elif exp_mode == 1: # clustering
+                assert prev_res_path is not None
+                self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_clustering_ogb_experiment
+            elif exp_mode == 2: # enhanced GNN
+                assert prev_res_path is not None
+                self.clustering_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_ogb_enhanced_gnn_experiment
+            elif exp_mode == 3: # full
                 self.run_experiments = self.run_ogb_experiments
             self.criterion = torch.nn.BCEWithLogitsLoss()
         elif dataset_str == 'CSL':
             self.dataset_path = osp.join('data', 'CSL', 'CSL_dataset')
-            if run_classical_exp:
+            if exp_mode == 0: # classical
                 self.run_experiments = self.run_classical_csl_prox_experiments
-            else:
+            elif exp_mode == 1: # clustering
+                assert prev_res_path is not None
+                self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_clustering_csl_prox_experiment
+            elif exp_mode == 2: # enhanced GNN
+                assert prev_res_path is not None
+                self.clustering_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_csl_prox_enhanced_gnn_experiment
+            elif exp_mode == 3: # full
                 self.run_experiments = self.run_csl_prox_experiments
         elif dataset_str.endswith('-Prox'):
             self.h = int(dataset_str[0])
             assert self.h in [1,3,5,8,10]
             self.dataset_path = osp.join('data', 'Proximity', f'{self.h}-Prox')
-            if run_classical_exp:
+            if exp_mode == 0: # classical
                 self.run_experiments = self.run_classical_csl_prox_experiments
-            else:
+            elif exp_mode == 1: # clustering
+                assert prev_res_path is not None
+                self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_clustering_csl_prox_experiment
+            elif exp_mode == 2: # enhanced GNN
+                assert prev_res_path is not None
+                self.clustering_hyperparameter_experiment_res_path = prev_res_path
+                self.run_experiments = self.run_csl_prox_enhanced_gnn_experiment
+            elif exp_mode == 3: # full
                 self.run_experiments = self.run_csl_prox_experiments
         else:
             raise ValueError('Invalid dataset string')
@@ -294,6 +332,323 @@ class Experiment_Manager():
         print(f'---   Test acc: mean: {test_mean}; std: {test_std}   ---')
 
         print('---   Optimizing classical GNN hyperparameters complete   ---')
+
+        data["overall_time"] = time.time() - t0
+
+        self.data.update(data)
+
+    def run_clustering_ogb_experiment(self) -> None:
+        t0 = time.time()
+
+        # Extract the result from the classical GNN experiment
+        classical_gnn_hyperparameter_experiment_res_path = self.classical_gnn_hyperparameter_experiment_res_path
+
+        classical_gnn_res_data = util.read_metadata_file(classical_gnn_hyperparameter_experiment_res_path)
+        best_classic_n_layers = classical_gnn_res_data["res"]["hyperparameter"]["best_num_layers"]
+        best_classic_n_hidden_channels = classical_gnn_res_data["res"]["hyperparameter"]["best_num_hidden_channels"]
+        best_classic_s_batch = classical_gnn_res_data["res"]["hyperparameter"]["best_batch_size"]
+        best_classic_n_epoch = classical_gnn_res_data["res"]["hyperparameter"]["best_num_epochs"]
+        best_classic_lr = classical_gnn_res_data["res"]["hyperparameter"]["best_lr"]
+
+        print(f'---   Starting experiments on {self.dataset_str}   ---')
+
+        data = {}
+        # data["dataset"] = self.dataset_str
+        if self.dataset_str == 'ogbg-molhiv':
+            data["loss_func"] = "BCE_with_logits_loss"
+            data["metric"] = "rocauc"
+        elif self.dataset_str == 'ogbg-ppa':
+            data["loss_func"] = "cross_entropy"
+            data["metric"] = "acc"
+        data["overall_time"] = -1.0
+        data["input_path"] = classical_gnn_hyperparameter_experiment_res_path
+        data["res"] = {}
+
+        # Optimize cluster hyperparameter
+        clusterer = Vertex_Partition_Clustering(self.root_path)
+
+        print('---   Optimizing clustering hyperparameters   ---')
+        # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
+        # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
+        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+                                                                                                                                                    hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
+                                                                                                                                                    n_epoch = best_classic_n_epoch, lr = best_classic_lr, lo_idx_str = self.lo_idx_str)
+
+        val_perfs = torch.tensor(best_val_perfs)
+        val_mean = val_perfs.mean().item()
+        if val_perfs.size()[0] == 1:
+            val_std = 0.0
+        else:
+            val_std = val_perfs.std().item()
+        test_perfs = torch.tensor(best_test_perfs)
+        test_mean = test_perfs.mean().item()
+        if test_perfs.size()[0] == 1:
+            test_std = 0.0
+        else:
+            test_std = test_perfs.std().item()
+
+        data["clustering_hyperparameter_opt"] = cluster_hyperparameter_opt_data
+
+        data["clustering_hyperparameter_opt"]["res"]["val_perf"]["mean"] = val_mean
+        data["clustering_hyperparameter_opt"]["res"]["val_perf"]["std"] = val_std
+
+        data["clustering_hyperparameter_opt"]["res"]["test_perf"]["mean"] = test_mean
+        data["clustering_hyperparameter_opt"]["res"]["test_perf"]["std"] = test_std
+
+        data["res"]["hyperparameter"] = {}
+        data["res"]["hyperparameter"]["best_num_clusters"] = best_num_clusters
+        data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
+        data["res"]["hyperparameter"]["best_pca_dim"] = best_pca_dim
+        data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
+        data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"] = osp.join(best_features_path, best_feature_metadata_filename)
+        data["res"]["hyperparameter"]["best_clustering_metadata_path"] = best_clustering_path
+
+        print(f'---   Val perf: mean: {val_mean}; std: {val_std}   ---')
+        print(f'---   Test perf: mean: {test_mean}; std: {test_std}   ---')
+
+        print('---   Optimizing clustering hyperparameters complete   ---')
+
+        data["overall_time"] = time.time() - t0
+
+        self.data.update(data)
+
+    def run_clustering_csl_prox_experiment(self, classical_gnn_hyperparameter_experiment_res_path: str) -> None:
+        t0 = time.time()
+
+        # Read previous results
+        classical_gnn_hyperparameter_experiment_res_path = self.classical_gnn_hyperparameter_experiment_res_path
+
+        classical_gnn_res_data = util.read_metadata_file(classical_gnn_hyperparameter_experiment_res_path)
+        best_classic_n_layers = classical_gnn_res_data["res"]["hyperparameter"]["best_num_layers"]
+        best_classic_n_hidden_channels = classical_gnn_res_data["res"]["hyperparameter"]["best_num_hidden_channels"]
+        best_classic_s_batch = classical_gnn_res_data["res"]["hyperparameter"]["best_batch_size"]
+        best_classic_n_epoch = classical_gnn_res_data["res"]["hyperparameter"]["best_num_epochs"]
+        best_classic_lr = classical_gnn_res_data["res"]["hyperparameter"]["best_lr"]
+
+        print(f'---   Starting experiments on {self.dataset_str}   ---')
+
+        data = {}
+        # data["dataset"] = self.dataset_str
+        data["loss_func"] = "cross_entropy"
+        data["metric"] = "acc"
+        data["overall_time"] = -1.0
+        data["input_path"] = classical_gnn_hyperparameter_experiment_res_path
+        data["res"] = {}
+
+        loss_func = F.cross_entropy
+
+        if self.dataset_str == 'CSL':
+            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+        elif self.dataset_str.endswith('-Prox'):
+            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+
+        splits = dataset.gen_data_splits()
+
+        # Optimize cluster hyperparameter
+        clusterer = Vertex_Partition_Clustering(self.root_path)
+
+        print('---   Optimizing clustering hyperparameters   ---')
+        # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
+        # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
+        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+                                                                                                                                                       hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
+                                                                                                                                                       n_epoch = best_classic_n_epoch, lr = best_classic_lr, splits = splits, loss_func = loss_func, lo_idx_str = self.lo_idx_str)
+
+        val_accs = torch.tensor(best_val_accs)
+        test_accs = torch.tensor(best_test_accs)
+        val_mean = val_accs.mean().item()
+        if val_accs.size()[0] == 1:
+            val_std = 0.0
+        else:
+            val_std = val_accs.std().item()
+        test_mean = test_accs.mean().item()
+        if test_accs.size()[0] == 1:
+            test_std = 0.0
+        else:
+            test_std = test_accs.std().item()
+
+        data["clustering_hyperparameter_opt"] = cluster_hyperparameter_opt_data
+
+        data["clustering_hyperparameter_opt"]["res"]["val_acc"]["mean"] = val_mean
+        data["clustering_hyperparameter_opt"]["res"]["val_acc"]["std"] = val_std
+
+        data["clustering_hyperparameter_opt"]["res"]["test_acc"]["mean"] = test_mean
+        data["clustering_hyperparameter_opt"]["res"]["test_acc"]["std"] = test_std
+
+        print(f'---   Val acc: mean: {val_mean}; std: {val_std}   ---')
+        print(f'---   Test acc: mean: {test_mean}; std: {test_std}   ---')
+
+        data["res"]["hyperparameter"] = {}
+        data["res"]["hyperparameter"]["best_num_clusters"] = best_num_clusters
+        data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
+        data["res"]["hyperparameter"]["best_pca_dim"] = best_pca_dim
+        data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
+        data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"] = osp.join(best_features_path, best_feature_metadata_filename)
+        data["res"]["hyperparameter"]["best_clustering_metadata_paths"] = best_clustering_paths
+
+        print('---   Optimizing clustering hyperparameters complete   ---')
+
+        data["overall_time"] = time.time() - t0
+
+        self.data.update(data)
+
+    def run_ogb_enhanced_gnn_experiment(self) -> None:
+        t0 = time.time()
+
+        # Read results from previous step
+        clustering_hyperparameter_experiment_res_path = self.clustering_hyperparameter_experiment_res_path
+
+        clustering_experiment_data = util.read_metadata_file(clustering_hyperparameter_experiment_res_path)
+        max_num_clusters = clustering_experiment_data["res"]["hyperparameter"]["max_num_clusters"]
+        vertex_feature_metadata_path = clustering_experiment_data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"]
+        best_clustering_metadata_path = clustering_experiment_data["res"]["hyperparameter"]["best_clustering_metadata_path"]
+
+        print(f'---   Starting experiments on {self.dataset_str}   ---')
+
+        data = {}
+        # data["dataset"] = self.dataset_str
+        if self.dataset_str == 'ogbg-molhiv':
+            data["loss_func"] = "BCE_with_logits_loss"
+            data["metric"] = "rocauc"
+        elif self.dataset_str == 'ogbg-ppa':
+            data["loss_func"] = "cross_entropy"
+            data["metric"] = "acc"
+        data["overall_time"] = -1.0
+        data["input_path"] = clustering_hyperparameter_experiment_res_path
+        data["res"] = {}
+
+        print('---   Running hyperparameter optimization for enhanced GNN   ---')
+        # Re-train enhanced gnn hyperparameter using clustering hyperparameter
+        enhanced_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = False, best_clustering_path = best_clustering_metadata_path, best_num_clusters = max_num_clusters, vertex_feature_metadata_path = vertex_feature_metadata_path)
+
+        data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
+
+        val_perfs = torch.tensor(best_val_perfs)
+        test_perfs = torch.tensor(best_test_perfs)
+        val_mean = val_perfs.mean().item()
+        if val_perfs.size()[0] == 1:
+            val_std = 0.0
+        else:
+            val_std = val_perfs.std().item()
+        test_perfs = torch.tensor(best_test_perfs)
+        test_mean = test_perfs.mean().item()
+        if test_perfs.size()[0] == 1:
+            test_std = 0.0
+        else:
+            test_std = test_perfs.std().item()
+
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["val_perf"]["mean"] = val_mean
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["val_perf"]["std"] = val_std
+
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["test_perf"]["mean"] = test_mean
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["test_perf"]["std"] = test_std
+
+        data["res"]["test_perf"] = {}
+        data["res"]["test_perf"]["mean"] = test_mean
+        data["res"]["test_perf"]["std"] = test_std
+        data["res"]["val_perf"] = {}
+        data["res"]["val_perf"]["mean"] = val_mean
+        data["res"]["val_perf"]["std"] = val_std
+        
+        data["res"]["hyperparameter"] = {}
+
+        data["res"]["hyperparameter"]["best_num_layers"] = best_n_layers
+        data["res"]["hyperparameter"]["best_num_hidden_channels"] = best_n_hidden_channels
+        data["res"]["hyperparameter"]["best_batch_size"] = best_s_batch
+        data["res"]["hyperparameter"]["best_num_epochs"] = best_n_epoch
+        data["res"]["hyperparameter"]["best_lr"] = best_lr
+
+        data["res"]["hyperparameter"]["best_num_clusters"] = clustering_experiment_data["res"]["hyperparameter"]["best_num_clusters"]
+        data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
+        data["res"]["hyperparameter"]["best_pca_dim"] = clustering_experiment_data["res"]["hyperparameter"]["best_pca_dim"]
+        data["res"]["hyperparameter"]["best_min_cluster_size"] = clustering_experiment_data["res"]["hyperparameter"]["best_min_cluster_size"]
+
+        print(f'---   Val perf: mean: {val_mean}; std: {val_std}   ---')
+        print(f'---   Test perf: mean: {test_mean}; std: {test_std}   ---')
+
+        print('---   Running hyperparameter optimization for enhanced GNN completed   ---')
+
+        data["overall_time"] = time.time() - t0
+
+    def run_csl_prox_enhanced_gnn_experiment(self) -> None:
+        t0 = time.time()
+
+        # Read results from previous step
+        clustering_hyperparameter_experiment_res_path = self.clustering_hyperparameter_experiment_res_path
+
+        clustering_experiment_data = util.read_metadata_file(clustering_hyperparameter_experiment_res_path)
+        max_num_clusters = clustering_experiment_data["res"]["hyperparameter"]["max_num_clusters"]
+        vertex_feature_metadata_path = clustering_experiment_data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"]
+        best_clustering_metadata_paths = clustering_experiment_data["res"]["hyperparameter"]["best_clustering_metadata_paths"]
+
+        print(f'---   Starting experiments on {self.dataset_str}   ---')
+
+        data = {}
+        # data["dataset"] = self.dataset_str
+        data["loss_func"] = "cross_entropy"
+        data["metric"] = "acc"
+        data["overall_time"] = -1.0
+        data["input_path"] = clustering_hyperparameter_experiment_res_path
+        data["res"] = {}
+
+        loss_func = F.cross_entropy
+
+        if self.dataset_str == 'CSL':
+            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+        elif self.dataset_str.endswith('-Prox'):
+            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+
+        splits = dataset.gen_data_splits()
+
+        print('---   Running hyperparameter optimization for enhanced GNN   ---')
+        # Re-train enhanced gnn hyperparameter using clustering hyperparameter
+        enhanced_hyperparameter_opt_data, best_val_accs, best_test_accs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = False, best_clustering_paths = best_clustering_metadata_paths, best_num_clusters = max_num_clusters, best_vertex_feature_metadata_path = vertex_feature_metadata_path)
+
+        data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
+
+        val_accs = torch.tensor(best_val_accs)
+        test_accs = torch.tensor(best_test_accs)
+        val_mean = val_accs.mean().item()
+        if val_accs.size()[0] == 1:
+            val_std = 0.0
+        else:
+            val_std = val_accs.std().item()
+        test_mean = test_accs.mean().item()
+        if test_accs.size()[0] == 1:
+            test_std = 0.0
+        else:
+            test_std = test_accs.std().item()
+
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["val_acc"]["mean"] = val_mean
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["val_acc"]["std"] = val_std
+
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["test_acc"]["mean"] = test_mean
+        data["enhanced_gnn_hyperparameter_opt"]["res"]["test_acc"]["std"] = test_std
+
+        data["res"]["test_acc"] = {}
+        data["res"]["test_acc"]["mean"] = test_mean
+        data["res"]["test_acc"]["std"] = test_std
+        data["res"]["val_acc"] = {}
+        data["res"]["val_acc"]["mean"] = val_mean
+        data["res"]["val_acc"]["std"] = val_std
+        
+        data["res"]["hyperparameter"] = {}
+
+        data["res"]["hyperparameter"]["best_num_layers"] = best_n_layers
+        data["res"]["hyperparameter"]["best_num_hidden_channels"] = best_n_hidden_channels
+        data["res"]["hyperparameter"]["best_batch_size"] = best_s_batch
+        data["res"]["hyperparameter"]["best_num_epochs"] = best_n_epoch
+        data["res"]["hyperparameter"]["best_lr"] = best_lr
+
+        data["res"]["hyperparameter"]["best_num_clusters"] = clustering_experiment_data["res"]["hyperparameter"]["best_num_clusters"]
+        data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
+        data["res"]["hyperparameter"]["best_pca_dim"] = clustering_experiment_data["res"]["hyperparameter"]["best_pca_dim"]
+        data["res"]["hyperparameter"]["best_min_cluster_size"] = clustering_experiment_data["res"]["hyperparameter"]["best_min_cluster_size"]
+
+        print(f'---   Val acc: mean: {val_mean}; std: {val_std}   ---')
+        print(f'---   Test acc: mean: {test_mean}; std: {test_std}   ---')
+
+        print('---   Running hyperparameter optimization for enhanced GNN completed   ---')
 
         data["overall_time"] = time.time() - t0
 
@@ -934,7 +1289,7 @@ class Experiment_Manager():
 
                                 t0 = time.time()
 
-                                rerun_data[cur_rerun]["epoch"][epoch] = {}
+                                # rerun_data[cur_rerun]["epoch"][epoch] = {}
 
                                 # train the gnn
                                 self.train_ogb(gnn = self.gnn, loader = train_loader, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train')
@@ -944,7 +1299,7 @@ class Experiment_Manager():
                                 val_perf = self.eval_ogb(gnn = self.gnn, loader = val_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_val_eval')[dataset.eval_metric].item()
                                 test_perf = self.eval_ogb(gnn = self.gnn, loader = test_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_test_eval')[dataset.eval_metric].item()
 
-                                rerun_data[cur_rerun]["epoch"][epoch]["perf"] = {'Train': train_perf, 'Validation': val_perf, 'Test': test_perf}
+                                # rerun_data[cur_rerun]["epoch"][epoch]["perf"] = {'Train': train_perf, 'Validation': val_perf, 'Test': test_perf}
 
                                 if best_rerun_val_perf < val_perf:
                                     best_rerun_val_perf = val_perf
@@ -958,7 +1313,7 @@ class Experiment_Manager():
 
                                 total_num_epoch += 1
                                 time_epoch = time.time() - t0
-                                rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
+                                # rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
                                 avg_epoch_time += time_epoch
                             
                             avg_epoch_time /= total_num_epoch
@@ -1009,6 +1364,7 @@ class Experiment_Manager():
         data["res"]["best_experiment_idx"] = best_val_perf_experiment_idx
         data["res"]["best_features_path"] = best_features_path
         data["res"]["best_feature_metadata_filename"] = best_features_metadata_filename
+        data["res"]["best_clustering_metadata_path"] = best_clustering_metadata_path
         data["res"]["best_num_clusters"] = best_num_clusters
         data["res"]["best_pca_dim"] = best_pca_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
@@ -1402,7 +1758,7 @@ class Experiment_Manager():
             rerun_data[cur_rerun] = {}
             rerun_data[cur_rerun]["best_val_acc"] = -1.0
             rerun_data[cur_rerun]["best_val_acc_epoch_idx"] = -1
-            rerun_data[cur_rerun]["epoch"] = {}
+            # rerun_data[cur_rerun]["epoch"] = {}
 
             self.gnn.model.reset_parameters()
 
@@ -1427,13 +1783,13 @@ class Experiment_Manager():
 
                 t0 = time.time()
 
-                rerun_data[cur_rerun]["epoch"][epoch] = {}
+                # rerun_data[cur_rerun]["epoch"][epoch] = {}
 
                 train_loss = self.train(gnn = self.gnn, loader = train_loader, loss_func = loss_func)
                 val_loss = self.val(gnn = self.gnn, loader = val_loader, loss_func = loss_func)
 
-                rerun_data[cur_rerun]["epoch"][epoch]["val_loss"] = val_loss
-                rerun_data[cur_rerun]["epoch"][epoch]["train_loss"] = train_loss
+                # rerun_data[cur_rerun]["epoch"][epoch]["val_loss"] = val_loss
+                # rerun_data[cur_rerun]["epoch"][epoch]["train_loss"] = train_loss
 
                 if best_val_loss > val_loss:
                     best_val_loss = val_loss
@@ -1449,7 +1805,7 @@ class Experiment_Manager():
                 total_num_epoch += 1
 
                 time_epoch = time.time() - t0
-                rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
+                # rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
                 avg_time_epoch += time_epoch
             
             avg_time_epoch /= total_num_epoch
@@ -1756,6 +2112,7 @@ class Experiment_Manager():
         data["res"]["best_experiment_idx"] = best_val_acc_experiment_idx
         data["res"]["best_features_path"] = best_features_path
         data["res"]["best_feature_metadata_filename"] = best_features_metadata_filename
+        data["res"]["best_clustering_metadata_paths"] = best_clustering_metadata_paths
         data["res"]["best_num_clusters"] = best_num_clusters
         data["res"]["best_pca_dim"] = best_pca_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
@@ -1906,110 +2263,3 @@ class Experiment_Manager():
             correct += pred.eq(data.y).sum().item()
 
         return correct / len(loader.dataset)
-
-#     def run_experiment_old(self, root_path: str, working_path: str, vertex_feature_metadata_path: str):
-
-#         vertex_feature_metadata = util.read_metadata_file(path = osp.join(root_path, vertex_feature_metadata_path))
-
-#         # create a clustering with pca
-#         clusterer = Vertex_Partition_Clustering(absolute_path_prefix = root_path)
-#         feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
-#         dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
-
-#         # split_prop is expected to be
-#         # ["desc"]
-#         # ["split_mode"]
-#         # ["num_samples"]
-#         # ["split_idx"] if split_mode is 'CV'
-#         split_desc = "Test_desc"
-#         split_mode = "Test"
-#         num_samples = -2
-#         split_idx = -1
-#         split_prop = { "desc" : split_desc, "split_mode" : split_mode, "num_samples" : num_samples, "split_idx" : split_idx}
-#         normalize = True
-
-#         clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split_prop = split_prop, normalize = normalize)
-        
-#         # PCA
-#         pca_target_dim = 2
-#         pca_filename = f'{pca_target_dim}_dim_pca.pkl'
-#         clusterer.generate_pca(target_dimensions = pca_target_dim, write_pca_path = working_path, write_pca_filename = pca_filename)
-#         clusterer.apply_pca_to_dataset()
-
-#         # k-means
-#         mbk_n_clusters = 6
-#         mbk_batch_size = 1024
-#         mbk_n_init = 10
-#         mbk_max_no_improvement = 10
-#         mbk_max_iter = 1000
-
-#         centroids_filename = f'{mbk_n_clusters}-means_centroids.txt'
-
-#         labels, centroids, inertia, clustering_time = clusterer.mini_batch_k_means(n_clusters = mbk_n_clusters, batch_size = mbk_batch_size, n_init = mbk_n_init, max_no_improvement = mbk_max_no_improvement, max_iter = mbk_max_iter)
-#         num_clusters = centroids.shape[0]
-
-#         clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
-
-#         metadata_filename = 'cluster_metadata.json'
-#         clusterer.write_metadata(path = working_path, filename = metadata_filename)
-
-#         # TODO: Test gnn_utils.py
-#         csl_path = osp.join('data', 'CSL', 'CSL_dataset')
-#         dataset_csl = CSL_Dataset(root = osp.join(root_path, csl_path))
-
-#         feature_metadata_path = vertex_feature_metadata_path
-#         cluster_metadata_path = osp.join(working_path, metadata_filename)
-
-#         dataset_csl, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset_csl, absolute_path_prefix = root_path, feature_metadata_path = feature_metadata_path, cluster_metadata_path = cluster_metadata_path)
-#         # Since we added the cluster_ids
-
-#         gnn_generator = GNN_Manager()
-#         gnn_generator.set_dataset_parameters(dataset = dataset_csl, num_clusters = num_clusters)
-
-#         # GNN parameters
-#         batch_size = 128
-#         hidden_channels = 32
-#         num_layers = 3
-#         lr = 0.01
-#         epochs = 100
-#         # dropout
-
-#         gnn_generator.generate_partition_enhanced_GIN_model(hidden_channels = hidden_channels, num_layers = num_layers, lr = lr)
-#         train_loader = DataLoader(dataset = gnn_generator.dataset[:0.8], batch_size = batch_size, shuffle = False)
-
-#         loss = self.train_partition_enhanced_GNN(gnn = gnn_generator, train_loader = train_loader)
-
-#         print(loss)
-
-#     def train_partition_enhanced_GNN(self, gnn: GNN_Manager, train_loader: DataLoader) -> float:
-#         device = constants.device
-        
-#         gnn.model.train()
-
-#         total_loss = 0
-#         for data in train_loader:
-#             data = data.to(device)
-#             gnn.optimizer.zero_grad()
-#             out = gnn.model(data)
-#             loss = F.cross_entropy(out, data.y)
-#             loss.backward()
-#             gnn.optimizer.step()
-#             total_loss += float(loss) * data.num_graphs
-
-#         return total_loss/len(train_loader.dataset)
-
-# if __name__ == '__main__':
-#     # test gnn util
-
-#     constants.initialize_random_seeds()
-
-#     torch.autograd.set_detect_anomaly(True)
-
-
-#     root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
-#     working_path = osp.join('data', 'CSL', 'CSL_dataset', 'results', 'vertex_sp_features')
-#     feature_metadata_path = osp.join(working_path, 'metadata.json')
-
-#     experiment_manager = Experiment_Manager()
-
-#     experiment_manager.run_experiment(root_path = root_path, working_path = osp.join(working_path, 'cluster-gnn'), vertex_feature_metadata_path = feature_metadata_path)

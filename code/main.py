@@ -23,8 +23,9 @@ def gen_experiment_config_file(root_path: str) -> None:
 
     config = {}
     config["type"] = "experiment"
-    config["mode"] = "---   'classical' or 'enhanced' depending on whether a classical or an enhanced gnn should be trained   ---"
+    config["mode"] = "---   'classical', 'clustering', 'enhanced' or 'full' depending on whether a full model experiment or only a single step should be executed   ---"
     config["title"] = "---   filename of the result (without extension)   ---"
+    config["prev_result_path"] = "---   path to a previous result if not classical or full experiment   ---"
     config["general"] = {}
     config["general"]["seed"] = constants.SEED
     config["general"]["num_workers"] = constants.num_workers
@@ -84,9 +85,11 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     normalize = False
     dataset_str = ''
     base_model = ''
-    run_classical_exp = False
+    exp_mode = -1 # 0 -> classical, 1 -> clustering, 2 -> enhanced, 3 -> full
     is_lovasz_feature = False
     lo_idx_str = ""
+
+    prev_result_path = None
 
     # config["general"]["mbk_batch_size"] = constants.mbk_batch_size
     # config["general"]["mbk_num_init"] = constants.mbk_n_init
@@ -97,9 +100,19 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         val = config["mode"]
         assert isinstance(val, str)
         if val == "classical":
-            run_classical_exp = True
+            exp_mode = 0
+        elif val == "clustering":
+            exp_mode = 1
+            assert "prev_result_path" in config
+            assert isinstance(config["prev_result_path"], str)
+            prev_result_path = config["prev_result_path"]
         elif val == "enhanced":
-            run_classical_exp = False
+            exp_mode = 2
+            assert "prev_result_path" in config
+            assert isinstance(config["prev_result_path"], str)
+            prev_result_path = config["prev_result_path"]
+        elif val == "full":
+            exp_mode = 3
         else:
             raise ValueError('Invalid mode specified in config')
 
@@ -262,7 +275,8 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     try:
         manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
                                     pca_dims = pca_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
-                                    num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, run_classical_exp = run_classical_exp, max_patience = constants.max_patience, lo_idx_str = lo_idx_str)
+                                    num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, exp_mode = exp_mode, max_patience = constants.max_patience, lo_idx_str = lo_idx_str,
+                                    prev_result_path = prev_result_path)
         
         manager.run_experiments()
 
@@ -271,7 +285,10 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         else:
             filename = f'experiment_{experiment_idx}_result.json'
 
-        util.write_metadata_file(data = manager.get_metadata(), path = path, filename = filename)
+        result_data = manager.get_metadata()
+        result_data["result_path"] = osp.join(path, filename)
+
+        util.write_metadata_file(data = result_data, path = path, filename = filename)
 
     except Exception as e:
         if "title" in config and isinstance(config["title"], str) and len(config["title"]) > 0:
