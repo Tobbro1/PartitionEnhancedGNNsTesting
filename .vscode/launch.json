@@ -19,7 +19,20 @@
             "console": "integratedTerminal",
             "args": [
                 "-f",
-                "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\testing_feature_gen.json"
+                "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\testing_experiment.json"
+            ]
+        },
+        {
+            "name": "Python Debugger: Current File with gen_feature_1-Prox",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "-r",
+                "E:\\workspace\\PartitionEnhancedGNNsTesting",
+                "-f",
+                "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\feature_gen_1-Prox.json"
             ]
         }
     ]

@@ -276,7 +276,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
                                     pca_dims = pca_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
                                     num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, exp_mode = exp_mode, max_patience = constants.max_patience, lo_idx_str = lo_idx_str,
-                                    prev_result_path = prev_result_path)
+                                    prev_res_path = prev_result_path)
         
         manager.run_experiments()
 
@@ -285,12 +285,13 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         else:
             filename = f'experiment_{experiment_idx}_result.json'
 
-        result_data = manager.get_metadata()
+        result_data = manager.get_data()
         result_data["result_path"] = osp.join(path, filename)
 
         util.write_metadata_file(data = result_data, path = path, filename = filename)
 
     except Exception as e:
+        raise e
         if "title" in config and isinstance(config["title"], str) and len(config["title"]) > 0:
             filename = f'{config["title"]}.json'
         else:

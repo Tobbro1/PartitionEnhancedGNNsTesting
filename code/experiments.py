@@ -236,8 +236,8 @@ class Experiment_Manager():
         print('---   Optimizing classical GNN hyperparameters   ---')
         hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = True)
 
-        val_perfs = torch.tensor(best_val_perfs)
-        test_perfs = torch.tensor(best_test_perfs)
+        val_perfs = torch.tensor(best_val_perfs, dtype = torch.float64)
+        test_perfs = torch.tensor(best_test_perfs, dtype = torch.float64)
         val_mean = val_perfs.mean().item()
         if val_perfs.size()[0] == 1:
             val_std = 0.0
@@ -299,8 +299,8 @@ class Experiment_Manager():
         print('---   Optimizing classical GNN hyperparameters   ---')
         hyperparameter_opt_data, best_val_accs, best_test_accs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = True)
 
-        val_accs = torch.tensor(best_val_accs)
-        test_accs = torch.tensor(best_test_accs)
+        val_accs = torch.tensor(best_val_accs, dtype = torch.float64)
+        test_accs = torch.tensor(best_test_accs, dtype = torch.float64)
         val_mean = val_accs.mean().item()
         if val_accs.size()[0] == 1:
             val_std = 0.0
@@ -374,13 +374,13 @@ class Experiment_Manager():
                                                                                                                                                     hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                     n_epoch = best_classic_n_epoch, lr = best_classic_lr, lo_idx_str = self.lo_idx_str)
 
-        val_perfs = torch.tensor(best_val_perfs)
+        val_perfs = torch.tensor(best_val_perfs, dtype = torch.float64)
         val_mean = val_perfs.mean().item()
         if val_perfs.size()[0] == 1:
             val_std = 0.0
         else:
             val_std = val_perfs.std().item()
-        test_perfs = torch.tensor(best_test_perfs)
+        test_perfs = torch.tensor(best_test_perfs, dtype = torch.float64)
         test_mean = test_perfs.mean().item()
         if test_perfs.size()[0] == 1:
             test_std = 0.0
@@ -412,7 +412,7 @@ class Experiment_Manager():
 
         self.data.update(data)
 
-    def run_clustering_csl_prox_experiment(self, classical_gnn_hyperparameter_experiment_res_path: str) -> None:
+    def run_clustering_csl_prox_experiment(self) -> None:
         t0 = time.time()
 
         # Read previous results
@@ -454,8 +454,8 @@ class Experiment_Manager():
                                                                                                                                                        hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                        n_epoch = best_classic_n_epoch, lr = best_classic_lr, splits = splits, loss_func = loss_func, lo_idx_str = self.lo_idx_str)
 
-        val_accs = torch.tensor(best_val_accs)
-        test_accs = torch.tensor(best_test_accs)
+        val_accs = torch.tensor(best_val_accs, dtype = torch.float64)
+        test_accs = torch.tensor(best_test_accs, dtype = torch.float64)
         val_mean = val_accs.mean().item()
         if val_accs.size()[0] == 1:
             val_std = 0.0
@@ -523,14 +523,14 @@ class Experiment_Manager():
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
-        val_perfs = torch.tensor(best_val_perfs)
-        test_perfs = torch.tensor(best_test_perfs)
+        val_perfs = torch.tensor(best_val_perfs, dtype = torch.float64)
+        # test_perfs = torch.tensor(best_test_perfs, dtype = torch.float64)
         val_mean = val_perfs.mean().item()
         if val_perfs.size()[0] == 1:
             val_std = 0.0
         else:
             val_std = val_perfs.std().item()
-        test_perfs = torch.tensor(best_test_perfs)
+        test_perfs = torch.tensor(best_test_perfs, dtype = torch.float64)
         test_mean = test_perfs.mean().item()
         if test_perfs.size()[0] == 1:
             test_std = 0.0
@@ -606,8 +606,8 @@ class Experiment_Manager():
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
-        val_accs = torch.tensor(best_val_accs)
-        test_accs = torch.tensor(best_test_accs)
+        val_accs = torch.tensor(best_val_accs, dtype = torch.float64)
+        test_accs = torch.tensor(best_test_accs, dtype = torch.float64)
         val_mean = val_accs.mean().item()
         if val_accs.size()[0] == 1:
             val_std = 0.0
@@ -683,14 +683,14 @@ class Experiment_Manager():
         print('---   Optimizing classical GNN hyperparameters   ---')
         hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = True)
 
-        val_perfs = torch.tensor(best_val_perfs)
-        test_perfs = torch.tensor(best_test_perfs)
+        val_perfs = torch.tensor(best_val_perfs, dtype = torch.float64)
+        # test_perfs = torch.tensor(best_test_perfs)
         val_mean = val_perfs.mean().item()
         if val_perfs.size()[0] == 1:
             val_std = 0.0
         else:
             val_std = val_perfs.std().item()
-        test_perfs = torch.tensor(best_test_perfs)
+        test_perfs = torch.tensor(best_test_perfs, dtype = torch.float64)
         test_mean = test_perfs.mean().item()
         if test_perfs.size()[0] == 1:
             test_std = 0.0
@@ -727,13 +727,13 @@ class Experiment_Manager():
                                                                                                                                                     hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                     n_epoch = best_classic_n_epoch, lr = best_classic_lr, lo_idx_str = self.lo_idx_str)
 
-        val_perfs = torch.tensor(best_val_perfs)
+        val_perfs = torch.tensor(best_val_perfs, dtype = torch.float64)
         val_mean = val_perfs.mean().item()
         if val_perfs.size()[0] == 1:
             val_std = 0.0
         else:
             val_std = val_perfs.std().item()
-        test_perfs = torch.tensor(best_test_perfs)
+        test_perfs = torch.tensor(best_test_perfs, dtype = torch.float64)
         test_mean = test_perfs.mean().item()
         if test_perfs.size()[0] == 1:
             test_std = 0.0
@@ -766,14 +766,14 @@ class Experiment_Manager():
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
-        val_perfs = torch.tensor(best_val_perfs)
-        test_perfs = torch.tensor(best_test_perfs)
+        val_perfs = torch.tensor(best_val_perfs, dtype = torch.float64)
+        # test_perfs = torch.tensor(best_test_perfs)
         val_mean = val_perfs.mean().item()
         if val_perfs.size()[0] == 1:
             val_std = 0.0
         else:
             val_std = val_perfs.std().item()
-        test_perfs = torch.tensor(best_test_perfs)
+        test_perfs = torch.tensor(best_test_perfs, dtype = torch.float64)
         test_mean = test_perfs.mean().item()
         if test_perfs.size()[0] == 1:
             test_std = 0.0
@@ -1310,6 +1310,7 @@ class Experiment_Manager():
                                     patience += 1
                                     if patience >= self.max_patience:
                                         stop = True
+                                        print(f"early stop: {total_num_epoch + 1} epochs")
 
                                 total_num_epoch += 1
                                 time_epoch = time.time() - t0
@@ -1673,10 +1674,10 @@ class Experiment_Manager():
                                     # dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[idx])
 
                                 # Evaluate a single experiment given the parameters
-                                avg_val_acc, rerun_data, avg_test_acc, avg_time_rerun_fold, avg_time_epoch_fold = self.run_csl_prox_gnn_hyperparameter_experiment_split(dataset = dataset, s_batch = s_batch, n_epoch = n_epoch, train_indices = train_indices, val_indices = val_indices, test_indices = test_indices, loss_func = loss_func)
+                                avg_val_acc, val_accs_fold, rerun_data, avg_test_acc, test_accs_fold, avg_time_rerun_fold, avg_time_epoch_fold = self.run_csl_prox_gnn_hyperparameter_experiment_split(dataset = dataset, s_batch = s_batch, n_epoch = n_epoch, train_indices = train_indices, val_indices = val_indices, test_indices = test_indices, loss_func = loss_func)
 
-                                test_accs.append(avg_test_acc)
-                                val_accs.append(avg_val_acc)
+                                test_accs.extend(test_accs_fold)
+                                val_accs.extend(val_accs_fold)
 
                                 # store data
                                 data_folds[idx]["avg_val_acc_split"] = avg_val_acc
@@ -1748,6 +1749,8 @@ class Experiment_Manager():
         rerun_data = {}
 
         avg_val_acc = 0.0
+        val_accs = []
+        test_accs = []
         avg_time_rerun = 0.0
         avg_time_epoch_overall = 0.0
         avg_test_acc = 0.0
@@ -1785,7 +1788,7 @@ class Experiment_Manager():
 
                 # rerun_data[cur_rerun]["epoch"][epoch] = {}
 
-                train_loss = self.train(gnn = self.gnn, loader = train_loader, loss_func = loss_func)
+                self.train(gnn = self.gnn, loader = train_loader, loss_func = loss_func)
                 val_loss = self.val(gnn = self.gnn, loader = val_loader, loss_func = loss_func)
 
                 # rerun_data[cur_rerun]["epoch"][epoch]["val_loss"] = val_loss
@@ -1801,6 +1804,7 @@ class Experiment_Manager():
                     patience += 1
                     if patience >= self.max_patience:
                         stop = True
+                        print(f"early stop: {total_num_epoch + 1} epochs")
                 
                 total_num_epoch += 1
 
@@ -1811,11 +1815,13 @@ class Experiment_Manager():
             avg_time_epoch /= total_num_epoch
             avg_time_epoch_overall += avg_time_epoch
             avg_test_acc += test_acc
+            test_accs.append(test_acc)
 
             rerun_data[cur_rerun]["best_val_acc"] = best_val_acc
             rerun_data[cur_rerun]["best_val_acc_epoch_idx"] = best_val_epoch
 
             avg_val_acc += best_val_acc
+            val_accs.append(best_val_acc)
             avg_time_rerun += time.time() - start_rerun
 
         avg_val_acc /= self.num_reruns
@@ -1823,7 +1829,7 @@ class Experiment_Manager():
         avg_time_epoch_overall /= self.num_reruns
         avg_test_acc /= self.num_reruns
 
-        return avg_val_acc, rerun_data, avg_test_acc, avg_time_rerun, avg_time_epoch_overall
+        return avg_val_acc, val_accs, rerun_data, avg_test_acc, test_accs, avg_time_rerun, avg_time_epoch_overall
     
     # Optimizing the hyperparameters used for clustering: num_clusters, pca_dim, min_cluster_size, k/r&s
     def run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(self, clusterer: Vertex_Partition_Clustering, n_layers: int, hidden_channels: int, s_batch: int, n_epoch: int, lr: float, splits: Dict, loss_func, lo_idx_str: str = "") -> Tuple[Dict, str, Dict, int, int, int]:
@@ -1847,7 +1853,7 @@ class Experiment_Manager():
                     elif self.dataset_str.endswith("-Prox"):
                         metadata_filenames.append(f"{self.h}-Prox_{k}-disk_lo_features{lo_idx_str}_metadata.json")
                 else:
-                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_SP_features'))
+                    vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_SP_features'))
                     if self.dataset_str == "CSL":
                         metadata_filenames.append(f"CSL_{k}-disk_SP_features_metadata.json")
                     elif self.dataset_str.endswith("-Prox"):
@@ -2057,14 +2063,14 @@ class Experiment_Manager():
                             avg_time_enhance_cluster_id += add_cluster_id_time
 
                             # Evaluate a single experiment given the parameters
-                            avg_val_acc_fold, rerun_data, avg_test_acc_fold, avg_time_rerun_fold, avg_time_epoch_fold = self.run_csl_prox_gnn_hyperparameter_experiment_split(dataset = dataset, s_batch = s_batch, n_epoch = n_epoch, train_indices = train_indices, val_indices = val_indices, test_indices = test_indices, loss_func = loss_func)
+                            avg_val_acc_fold, val_accs_fold, rerun_data, avg_test_acc_fold, test_accs_fold, avg_time_rerun_fold, avg_time_epoch_fold = self.run_csl_prox_gnn_hyperparameter_experiment_split(dataset = dataset, s_batch = s_batch, n_epoch = n_epoch, train_indices = train_indices, val_indices = val_indices, test_indices = test_indices, loss_func = loss_func)
 
                             # store data
                             data_folds[idx]["avg_val_acc_split"] = avg_val_acc_fold
                             data_folds[idx]["rerun"] = rerun_data
 
-                            val_accs.append(avg_val_acc_fold)
-                            test_accs.append(avg_test_acc_fold)
+                            val_accs.extend(val_accs_fold)
+                            test_accs.extend(test_accs_fold)
 
                             avg_val_acc += avg_val_acc_fold
                             avg_time_rerun += avg_time_rerun_fold
@@ -2142,7 +2148,8 @@ class Experiment_Manager():
         gnn.model.train()
         
         if self.dataset_str == 'ogbg-ppa':
-            for step, batch in enumerate(tqdm(loader, desc = desc)):
+            for step, batch in enumerate(loader):
+            # for step, batch in enumerate(tqdm(loader, desc = desc)):
                 batch = batch.to(gnn.device)
 
                 if batch.x.shape[0] == 1 or batch.batch[-1] == 0:
@@ -2158,7 +2165,8 @@ class Experiment_Manager():
                     loss.backward()
                     gnn.optimizer.step()
         elif self.dataset_str == 'ogbg-molhiv':
-            for step, batch in enumerate(tqdm(loader, desc = desc)):
+            for step, batch in enumerate(loader):
+            # for step, batch in enumerate(tqdm(loader, desc = desc)):
                 batch = batch.to(gnn.device)
 
                 if batch.x.shape[0] == 1 or batch.batch[-1] == 0:
@@ -2186,7 +2194,8 @@ class Experiment_Manager():
         y_pred = []
 
         if self.dataset_str == 'ogbg-ppa':
-            for step, batch in enumerate(tqdm(loader, desc = desc)):
+            for step, batch in enumerate(loader):
+            # for step, batch in enumerate(tqdm(loader, desc = desc)):
                 batch = batch.to(gnn.device)
 
                 if batch.x.shape[0] == 1:
@@ -2206,7 +2215,8 @@ class Experiment_Manager():
             return evaluator.eval(input_dict)
 
         elif self.dataset_str == 'ogbg-molhiv':
-            for step, batch in enumerate(tqdm(loader, desc = desc)):
+            for step, batch in enumerate(loader):
+            # for step, batch in enumerate(tqdm(loader, desc = desc)):
                 batch = batch.to(gnn.device)
 
                 if batch.x.shape[0] == 1:
@@ -2231,7 +2241,8 @@ class Experiment_Manager():
         gnn.model.train()
 
         total_loss = 0.0
-        for step, data in enumerate(tqdm(loader, desc = desc)):
+        for step, data in enumerate(loader):
+        # for step, data in enumerate(tqdm(loader, desc = desc)):
             data = data.to(gnn.device)
             gnn.optimizer.zero_grad()
             loss = loss_func(gnn.model(data), data.y)
@@ -2246,7 +2257,8 @@ class Experiment_Manager():
         gnn.model.eval()
 
         total_loss = 0.0
-        for step, data in enumerate(tqdm(loader, desc = desc)):
+        for step, data in enumerate(loader):
+        # for step, data in enumerate(tqdm(loader, desc = desc)):
             data = data.to(gnn.device)
             total_loss += data.num_graphs * loss_func(gnn.model(data), data.y).item()
 
@@ -2257,7 +2269,8 @@ class Experiment_Manager():
         gnn.model.eval()
 
         correct = 0
-        for step, data in enumerate(tqdm(loader, desc = desc)):
+        for step, data in enumerate(loader):
+        # for step, data in enumerate(tqdm(loader, desc = desc)):
             data = data.to(gnn.device)
             pred = gnn.model(data).max(dim = 1)[1]  # gnn.model(data).max(dim = 1) returns a tuple max_vals, max_indices
             correct += pred.eq(data.y).sum().item()

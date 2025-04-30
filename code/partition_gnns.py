@@ -152,7 +152,7 @@ class Partition_enhanced_GIN(torch.nn.Module):
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
-        x = torch.cat((data.x[:,1:], torch.zeros((data.x.size()[0], self.hidden_in_channel_diff)).to(self.device)), dim = 1)
+        x = torch.cat((data.x[:,1:], torch.zeros((data.x.size()[0], self.hidden_in_channel_diff)).to(self.device)), dim = 1).to(dtype = torch.float32)
         clustering_labels = data.x[:,0]
         edge_index = data.edge_index
         batch = data.batch
@@ -289,7 +289,7 @@ class GIN_Classic(torch.nn.Module):
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
-        x = data.x
+        x = data.x.to(dtype = torch.float32, copy = True)
         edge_index = data.edge_index
         batch = data.batch
 
@@ -372,7 +372,7 @@ class Partition_enhanced_GCN(torch.nn.Module):
 
     # In the GCN model the trainable parameters are represented by the parameter matrices within the convolutions
 
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, num_clusters, use_batch_norm: bool, normalize: bool = True, bias: bool = True):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers, num_clusters, use_batch_norm: bool, normalize: bool = True, bias: bool = False):
         super().__init__()
 
         assert hidden_channels >= in_channels
@@ -461,7 +461,7 @@ class Partition_enhanced_GCN(torch.nn.Module):
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
-        x = torch.cat((data.x[:,1:], torch.zeros((list(data.x.size())[0], self.hidden_in_channel_diff)).to(self.device)), dim = 1)
+        x = torch.cat((data.x[:,1:], torch.zeros((list(data.x.size())[0], self.hidden_in_channel_diff)).to(self.device)), dim = 1).to(dtype = torch.float32)
         clustering_labels = data.x[:,0]
         edge_index = data.edge_index
         batch = data.batch
@@ -495,6 +495,9 @@ class Partition_enhanced_GCN(torch.nn.Module):
             if self.use_batch_norm:
                 x = self.norm_convs[t](x)
 
+            # Apply ReLU
+            x = F.relu(x)
+
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
             layer_global_add_pool_res[t,:,:] = global_add_pool(x, batch)
@@ -520,6 +523,11 @@ class GCN_Classic(torch.nn.Module):
         self.hidden_channels = hidden_channels
         self.use_batch_norm = use_batch_norm
 
+        if not normalize:
+            add_self_loops = True
+        else:
+            add_self_loops = False
+
         self.device = constants.device
 
         self.convs = torch.nn.ModuleList()
@@ -539,7 +547,7 @@ class GCN_Classic(torch.nn.Module):
         for l in range(self.num_layers):
             convs_p = []
 
-            conv = GCNConv(in_channels = in_channels, out_channels = hidden_channels, improved = False, cached = False, normalize = normalize, bias = bias)
+            conv = GCNConv(in_channels = in_channels, out_channels = hidden_channels, add_self_loops = add_self_loops, improved = False, cached = False, normalize = normalize, bias = bias)
             self.convs.append(conv)
             convs_p.append(conv)
 
@@ -594,7 +602,7 @@ class GCN_Classic(torch.nn.Module):
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
-        x = data.x
+        x = data.x.to(dtype = torch.float32, copy = True)
         edge_index = data.edge_index
         batch = data.batch
 
@@ -610,6 +618,9 @@ class GCN_Classic(torch.nn.Module):
 
             if self.use_batch_norm:
                 x = self.norm_convs[t](x)
+
+            # Apply ReLU
+            x = F.relu(x)
 
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
@@ -748,14 +759,12 @@ class GNN_Manager():
     def generate_partition_enhanced_GCN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
         assert self.num_features > 0 and self.num_classes > 0 and self.num_clusters > 0
 
-        num_clusters = torch.unique(self.clustering_labels).size(dim = 0)
-
         self.model = Partition_enhanced_GCN(
             in_channels = self.num_features,
             hidden_channels = hidden_channels,
             out_channels =  self.num_classes,
             num_layers = num_layers,
-            num_clusters = num_clusters,
+            num_clusters = self.num_clusters,
             use_batch_norm = constants.use_batch_norm
         ).to(self.device)
 
