@@ -99,10 +99,10 @@ class Partition_enhanced_GIN(torch.nn.Module):
                 convs_p.append(conv)
                 self.convs.append(conv)
 
-            if self.use_batch_norm:
-                batch_norm = BatchNorm(in_channels = hidden_channels)
-                self.norm_convs.append(batch_norm)
-                convs_p.append(batch_norm)
+                if self.use_batch_norm:
+                    batch_norm = BatchNorm(in_channels = hidden_channels, allow_single_element = True)
+                    self.norm_convs.append(batch_norm)
+                    convs_p.append(batch_norm)
 
             # Saving parameter properties
             sum_p_layer = 0
@@ -178,8 +178,8 @@ class Partition_enhanced_GIN(torch.nn.Module):
                     x[mask,:] = self.convs[conv_idx](x, edge_index, mask)
                 # x = self.convs[conv_idx](torch.masked_select(x, mask), edge_index)
 
-            if self.use_batch_norm:
-                x = self.norm_convs[t](x)
+                if self.use_batch_norm:
+                    x[mask,:] = self.norm_convs[conv_idx](x[mask,:])
 
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
@@ -408,10 +408,10 @@ class Partition_enhanced_GCN(torch.nn.Module):
                 convs_p.append(conv)
                 self.convs.append(conv)
 
-            if self.use_batch_norm:
-                batch_norm = BatchNorm(in_channels = hidden_channels)
-                self.norm_convs.append(batch_norm)
-                convs_p.append(batch_norm)
+                if self.use_batch_norm:
+                    batch_norm = BatchNorm(in_channels = hidden_channels)
+                    self.norm_convs.append(batch_norm)
+                    convs_p.append(batch_norm)
 
             # Saving parameter properties
             sum_p_layer = 0
@@ -490,13 +490,13 @@ class Partition_enhanced_GCN(torch.nn.Module):
                 else:
                     x2[mask,:] = self.convs[conv_idx](x, edge_index, mask)
                 
+                # Apply ReLU
+                x2[mask,:] = F.relu(x2[mask,:])
+
+                if self.use_batch_norm:
+                    x2[mask,:] = self.norm_convs[conv_idx](x2[mask,:])
+
             x = x2
-
-            if self.use_batch_norm:
-                x = self.norm_convs[t](x)
-
-            # Apply ReLU
-            x = F.relu(x)
 
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)

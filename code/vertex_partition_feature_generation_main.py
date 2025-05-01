@@ -682,16 +682,16 @@ def run_proximity(h_vals: List[int], sp_k_vals: Optional[List[int]] = None, sp_r
 
     possible_h = [1,3,5,8,10]
 
+    # sanity checks
+    assert [h in possible_h for h in h_vals]
+
     need_download = False
-    for h in possible_h:
+    for h in h_vals:
         if not osp.exists(osp.join(path, f'{h}-Prox')):
             need_download = True
 
     if need_download:
         download_proximity(root = path)
-
-    # sanity checks
-    assert [h in possible_h for h in h_vals]
 
     # select some constant values
     num_processes = constants.num_processes
