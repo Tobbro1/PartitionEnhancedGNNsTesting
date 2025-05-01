@@ -25,7 +25,7 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
         # sanity checks
         assert r > 0
         assert s > 0
-        assert s > r
+        assert s >= r
 
         self.r = r
         self.s = s
