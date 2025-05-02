@@ -1310,7 +1310,7 @@ class Experiment_Manager():
                                     patience += 1
                                     if patience >= self.max_patience:
                                         stop = True
-                                        print(f"early stop: {total_num_epoch + 1} epochs")
+                                        # print(f"early stop: {total_num_epoch + 1} epochs")
 
                                 total_num_epoch += 1
                                 time_epoch = time.time() - t0
@@ -1804,7 +1804,7 @@ class Experiment_Manager():
                     patience += 1
                     if patience >= self.max_patience:
                         stop = True
-                        print(f"early stop: {total_num_epoch + 1} epochs")
+                        # print(f"early stop: {total_num_epoch + 1} epochs")
                 
                 total_num_epoch += 1
 

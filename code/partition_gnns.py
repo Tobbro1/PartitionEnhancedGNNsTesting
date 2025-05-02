@@ -616,11 +616,11 @@ class GCN_Classic(torch.nn.Module):
             
             x = conv(x, edge_index)
 
-            if self.use_batch_norm:
-                x = self.norm_convs[t](x)
-
             # Apply ReLU
             x = F.relu(x)
+
+            if self.use_batch_norm:
+                x = self.norm_convs[t](x)
 
             # store pooling res
             # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
