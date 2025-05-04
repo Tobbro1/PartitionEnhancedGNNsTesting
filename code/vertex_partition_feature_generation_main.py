@@ -799,7 +799,6 @@ def run_proximity(h_vals: List[int], sp_k_vals: Optional[List[int]] = None, sp_r
         if lo_r_vals is not None and lo_s_vals is not None and len(lo_r_vals) > 0 and len(lo_s_vals) == len(lo_r_vals):
             assert lo_graph_sizes_range is not None and lo_graph_sizes_range[0] > 0 and lo_graph_sizes_range[1] > 0 and lo_num_samples is not None
 
-
             for idx in range(len(lo_r_vals)):
                 s = lo_s_vals[idx]
                 r = lo_r_vals[idx]

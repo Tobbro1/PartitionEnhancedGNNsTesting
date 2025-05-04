@@ -441,7 +441,7 @@ class Vertex_Partition_Clustering():
         init_size = 3 * batch_size
         if init_size < n_clusters:
             init_size = 3 * n_clusters
-        reassignment_ratio = 0.1
+        reassignment_ratio = 0.01
         tol = 0.0
 
         self.metadata["result_prop"]["desc"] = desc

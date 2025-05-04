@@ -19,6 +19,8 @@ from torch_geometric.nn import MLP, GINConv, GCNConv, global_add_pool
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 from torch_geometric.logging import log
 from torch_geometric.typing import Adj, OptPairTensor, Size, SparseTensor, OptTensor
+from torch_geometric.utils import spmm
+from torch_geometric.nn.dense.linear import Linear
 
 # System
 import os.path as osp
@@ -560,10 +562,11 @@ class GCN_Classic(torch.nn.Module):
             sum_p_layer = 0
             sum_p_size_layer = 0
             dtype = None
-            for p in conv.parameters():
-                sum_p_layer += p.numel()
-                sum_p_size_layer += p.nbytes
-                dtype = str(p.dtype)
+            for conv in convs_p:
+                for p in conv.parameters():
+                    sum_p_layer += p.numel()
+                    sum_p_size_layer += p.nbytes
+                    dtype = str(p.dtype)
             sum_p += sum_p_layer
             sum_p_size += sum_p_size_layer
 
@@ -635,6 +638,359 @@ class GCN_Classic(torch.nn.Module):
             x = torch.cat((x, layer_global_add_pool_res[t,:,:]), dim = 1)
 
         return self.pool_mlp(x)
+
+class GPNNEdgeConv(GINConv):
+    def __init__(self, nn: Callable, eps: float = 0., train_eps: bool = True, **kwargs):
+        super().__init__(nn, eps, train_eps, **kwargs)
+
+    def forward(
+        self,
+        x: Union[Tensor, OptPairTensor],
+        edge_index: Adj,
+        size: Size = None,
+    ) -> Tensor:
+
+        # x corresponds to alpha 
+        if isinstance(x, Tensor):
+            x = (x, x)
+
+        # propagate_type: (x: OptPairTensor)
+
+        out = self.propagate(edge_index, alpha = x, size=size, num_vertices = edge_index.size()[1])
+
+        x_r = x[1]
+        if x_r is not None:
+            out = out + (1 + self.eps) * x_r
+
+        return self.nn(out)
+    
+    # # Overwrite the message
+    # def message(self, x_i: Tensor, x_j: Tensor, alpha: Tensor, v: int, w: int) -> Tensor:
+    #     r"""Constructs messages from node :math:`j` to node :math:`i`
+    #     in analogy to :math:`\phi_{\mathbf{\Theta}}` for each edge in
+    #     :obj:`edge_index`.
+    #     This function can take any argument as input which was initially
+    #     passed to :meth:`propagate`.
+    #     Furthermore, tensors passed to :meth:`propagate` can be mapped to the
+    #     respective nodes :math:`i` and :math:`j` by appending :obj:`_i` or
+    #     :obj:`_j` to the variable name, *.e.g.* :obj:`x_i` and :obj:`x_j`.
+    #     """
+
+    #     #idx_j is a hack to get j by passing a tensor (0,...,n) as idx
+    #     i = x_i.item()
+    #     j = x_j.item()
+
+    #     # Needs to return alpha(u, x_j,) + alpha(v, x_j)
+    #     return x_j
+    
+    # def aggregate(
+    #     self,
+    #     inputs: Tensor,
+    #     index: Tensor,
+    #     ptr: Optional[Tensor] = None,
+    #     dim_size: Optional[int] = None,
+    # ) -> Tensor:
+    #     r"""Aggregates messages from neighbors as
+    #     :math:`\bigoplus_{j \in \mathcal{N}(i)}`.
+
+    #     Takes in the output of message computation as first argument and any
+    #     argument which was initially passed to :meth:`propagate`.
+
+    #     By default, this function will delegate its call to the underlying
+    #     :class:`~torch_geometric.nn.aggr.Aggregation` module to reduce messages
+    #     as specified in :meth:`__init__` by the :obj:`aggr` argument.
+    #     """
+    #     return self.aggr_module(inputs, index, ptr=ptr, dim_size=dim_size,
+    #                             dim=self.node_dim)
+
+    def message_and_aggregate(self, adj_t: Adj, alpha: OptPairTensor, num_vertices: int) -> Tensor:
+        if isinstance(adj_t, SparseTensor):
+            adj_t = adj_t.set_value(None, layout=None)
+
+        local_alpha = alpha[0]
+        alpha_copy = alpha[1]
+        f = local_alpha.size()[1]
+
+        for v in range(num_vertices):
+            for w in range(num_vertices):
+                # alpha_vw corresponds to alpha_{v*n+w}
+                A = torch.empty(size = (num_vertices, f), dtype = local_alpha.dtype)
+                for j in range(num_vertices):
+                    A[j,:] = alpha_copy[v*num_vertices+j,:] + alpha_copy[w*num_vertices+j,:]
+
+                local_alpha[v*num_vertices + w] = spmm(adj_t, A, reduce=self.aggr)
+
+        return local_alpha
+
+class GPNN(torch.nn.Module):
+
+    def __init__(self, num_gpnn_layers: int, gpnn_channels: int, num_classes: int, base_gnn: str, base_gnn_layers: int, base_gnn_in_channels: int,
+                 base_gnn_hidden_channels: int, out_channels: int, use_batch_norm: bool) -> None:
+        super().__init__()
+
+        # Stores the base GNN (i.e. the classic GIN/GCN)
+        assert base_gnn == 'gin' or base_gnn == 'gcn'
+
+        self.num_gpnn_layers = num_gpnn_layers
+        self.num_classes = num_classes
+        self.gpnn_channels = gpnn_channels
+
+        self.base_gnn_layers = base_gnn_layers
+        self.base_gnn_in_channels = base_gnn_in_channels
+        self.base_gnn_hidden_channels = base_gnn_hidden_channels
+        self.use_batch_norm = use_batch_norm
+        self.base_gnn = base_gnn
+
+        self.device = constants.device
+
+        self.vertex_convs = torch.nn.ModuleList()
+        self.edge_convs = torch.nn.ModuleList()
+
+        self.gnn_convs = torch.nn.ModuleList()
+        self.norm_convs = torch.nn.ModuleList()
+
+        self.W = torch.nn.ParameterList()
+        self.omega = torch.nn.ParameterList()
+        for c in self.num_classes:
+            self.omega.append(torch.nn.Parameter(torch.randn(1,1)))
+            self.W.append(Linear(2 * gpnn_channels + num_classes, gpnn_channels, bias = False, weight_initializer = 'glorot'))
+
+        # properties of the parameters per layer and in total
+        self.parameter_props = {}
+        self.parameter_props["total"] = {}
+        self.parameter_props["total"]["num"] = -1
+        self.parameter_props["total"]["dtype"] = ""
+        self.parameter_props["total"]["size"] = -1
+        self.parameter_props["gpnn"] = {}
+        self.parameter_props["gpnn"]["layer"] = {}
+        self.parameter_props["base_gnn"] = {}
+        self.parameter_props["base_gnn"]["layer"] = {}
+
+        sum_p = 0
+        sum_p_size = 0
+
+        gpnn_in_channels = 1
+
+        # generate GPNN
+        for l in range(self.num_gpnn_layers):
+            convs_p = []
+
+            vertex_mlp = MLP([gpnn_in_channels, self.gpnn_channels, self.gpnn_channels], act = 'relu')
+            vertex_conv = GINConv(nn = vertex_mlp, train_eps = True)
+            self.vertex_convs.append(vertex_conv)
+
+            edge_mlp = MLP([gpnn_in_channels, self.gpnn_channels, self.gpnn_channels], act = 'relu')
+            edge_conv = GPNNEdgeConv(nn = edge_mlp, train_eps = True)
+            self.edge_convs.append(edge_conv)
+
+            convs_p.append(vertex_conv)
+            convs_p.append(edge_conv)
+
+            # Saving parameter properties
+            sum_p_layer = 0
+            sum_p_size_layer = 0
+            dtype = None
+            for conv in convs_p:
+                for p in conv.parameters():
+                    sum_p_layer += p.numel()
+                    sum_p_size_layer += p.nbytes
+                    dtype = str(p.dtype)
+            sum_p += sum_p_layer
+            sum_p_size += sum_p_size_layer
+
+            self.parameter_props["gpnn"]["layer"][l] = {}
+            self.parameter_props["gpnn"]["layer"][l]["num"] = sum_p_layer
+            self.parameter_props["gpnn"]["layer"][l]["dtype"] = dtype
+            self.parameter_props["gpnn"]["layer"][l]["size"] = sum_p_size_layer
+
+            self.parameter_props["total"]["dtype"] = dtype
+
+            gpnn_in_channels = self.gpnn_channels
+
+        for p in self.omega:
+            sum_p += p.numel()
+            sum_p_size += p.nbytes
+
+        for w in self.W:
+            sum_p += w.numel()
+            sum_p_size += w.nbytes
+
+        # generate base GNN
+        for l in range(base_gnn_layers):
+            convs_p = []
+
+            if self.base_gnn == 'gcn':
+                conv = GCNConv(in_channels = base_gnn_in_channels, out_channels = self.base_gnn_hidden_channels, add_self_loops = False, improved = False, cached = False, normalize = True, bias = True)
+                self.gnn_convs.append(conv)
+                convs_p.append(conv)
+            elif self.base_gnn == 'gin':
+                mlp = MLP([base_gnn_in_channels, self.base_gnn_hidden_channels, self.base_gnn_hidden_channels], act = 'relu')
+                conv = GINConv(nn = mlp, train_eps = False)
+                conv.node_dim = 0
+                self.gnn_convs.append(conv)
+                convs_p.append(conv)
+
+            if self.use_batch_norm:
+                batch_norm = BatchNorm(in_channels = self.base_gnn_hidden_channels)
+                self.norm_convs.append(batch_norm)
+                convs_p.append(batch_norm)
+
+            # Saving parameter properties
+            sum_p_layer = 0
+            sum_p_size_layer = 0
+            dtype = None
+            for conv in convs_p:
+                for p in conv.parameters():
+                    sum_p_layer += p.numel()
+                    sum_p_size_layer += p.nbytes
+                    dtype = str(p.dtype)
+            sum_p += sum_p_layer
+            sum_p_size += sum_p_size_layer
+
+            self.parameter_props["base_gnn"]["layer"][l] = {}
+            self.parameter_props["base_gnn"]["layer"][l]["num"] = sum_p_layer
+            self.parameter_props["base_gnn"]["layer"][l]["dtype"] = dtype
+            self.parameter_props["base_gnn"]["layer"][l]["size"] = sum_p_size_layer
+
+            base_gnn_in_channels = self.base_gnn_hidden_channels
+
+        self.parameter_props["total"]["num"] = sum_p
+        self.parameter_props["total"]["size"] = sum_p_size
+
+        # graph level pooling
+        self.pool_mlp = MLP([(self.base_gnn_hidden_channels * self.base_gnn_layers) + (self.num_gpnn_layers * self.gpnn_channels), self.gpnn_channels + self.base_gnn_hidden_channels, out_channels], act = 'relu')
+
+        sum_p_layer = 0
+        sum_p_size_layer = 0
+        for p in self.pool_mlp.parameters():
+            sum_p_layer += p.numel()
+            sum_p_size_layer += p.nbytes
+            dtype = str(p.dtype)
+        self.parameter_props["layer"]["pool"] = {}
+        self.parameter_props["layer"]["pool"]["num"] = sum_p_layer
+        self.parameter_props["layer"]["pool"]["dtype"] = dtype
+        self.parameter_props["layer"]["pool"]["size"] = sum_p_size_layer
+
+    def reset_parameters(self):
+        for conv in self.vertex_convs:
+            conv.reset_parameters()
+
+        for conv in self.edge_convs:
+            conv.reset_parameters()
+
+        for conv in self.gnn_convs:
+            conv.reset_parameters()
+
+        for conv in self.norm_convs:
+            conv.reset_parameters()
+
+        for p in self.omega:
+            p = torch.nn.Parameter(torch.randn(1,1))
+
+        self.W.reset_parameters()
+    
+    # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
+    def forward(self, data: Data):
+        batch = data.batch
+        num_graphs_in_batch = torch.unique(batch).size()[0]
+
+
+        edge_index = torch.clone(data.edge_index)
+        # gamma_0(v) := clustering_labels[v]
+        gamma = torch.clone(data.x[:,0])
+        
+        # generate alpha => alpha_0(v,w) = edge_label(v,w)
+        # generate the initial edge colors
+        num_vertices = x.shape[0]
+
+        # generate c adjecency matrices to later quickly evalute the corresponding neighborhoods
+        class_adjacencies = []
+        # we explicitely convert the edge_index to a sparse tensor
+        edge_index_csr = edge_index.to_torch_sparse_csr_tensor()
+        for c in range(self.num_classes):
+            c_adj = torch.clone(edge_index_csr)
+            cols = gamma != c
+            c_adj[:,cols] = 0
+            class_adjacencies.append(c_adj)
+
+        # Generate the initial alpha
+        alpha = torch.empty(size = (num_vertices ** 2,), dtype = torch.float32)
+        for v in range(num_vertices):
+            for w in range(num_vertices):
+                class_v = gamma[v].item()
+                class_w = gamma[w].item()
+
+                # check whether there exists an edge between v and w
+                # we assume the graphs to be undirected
+                possible_edges = edge_index[0][edge_index[1] == v]
+                edge_exists = w in possible_edges
+                
+                if class_v == class_w and edge_exists:
+                    # case 1
+                    alpha[v*num_vertices + w] = hash(tuple([class_v, 0, class_w]))
+                elif class_v != class_w and edge_exists:
+                    # case 2
+                    alpha[v*num_vertices + w] = hash(tuple([class_v, 1, class_w]))
+                else:
+                    # case 3, edge does not exist
+                    alpha[v*num_vertices + w] = hash(tuple([class_v, 2, class_w]))
+
+        # We need to store the sum of all features after each layer in order to compute the graph level readout
+        gpnn_layer_global_add_pool_res = torch.empty((self.num_gpnn_layers, num_graphs_in_batch, self.gpnn_channels), device = self.device)
+
+        # compute GPNN
+        for l in range(self.num_gpnn_layers):
+            beta = self.vertex_convs[l](gamma, edge_index)
+
+            # update alpha
+            alpha = self.edge_convs[l](alpha, edge_index)
+
+            # update gamma
+            gamma = torch.zeros((num_vertices,self.gpnn_channels), dtype = alpha.dtype)
+            for c in range(self.num_classes):
+                u_c = torch.zeros(size = (self.num_classes))
+                u_c[c] = 1
+                vector = torch.empty((num_vertices, self.gpnn_channels))
+                for v in range(num_vertices):
+                    vector[v,:] = torch.concat((beta, alpha[v * num_vertices:(v+1) * num_vertices,:], u_c), dim = 1)
+                    vector = self.W[c](vector)
+                    gamma_v = spmm(c_adj[c], vector)
+                    gamma[v,:] += self.omega[c] * gamma_v
+
+            gpnn_layer_global_add_pool_res[t,:,:] = global_add_pool(x, batch)
+
+        # compute GNN
+        x = torch.cat((torch.clone(data.x[:,1:]), torch.zeros((list(data.x.size())[0], self.base_gnn_hidden_channels - self.base_gnn_in_channels)).to(self.device)), dim = 1).to(dtype = torch.float32)
+        edge_index = torch.clone(data.edge_index)
+
+        # We need to store the sum of all features after each layer in order to compute the graph level readout
+        gnn_layer_global_add_pool_res = torch.empty((self.base_gnn_layers, num_graphs_in_batch, self.base_gnn_hidden_channels), device = self.device)
+
+        for t in range(self.base_gnn_layers):
+            x = self.gnn_convs[t](x, edge_index)
+
+            if self.base_gnn == 'gcn':
+                # Apply ReLU
+                x = F.relu(x)
+
+            if self.use_batch_norm:
+                x = self.norm_convs[t](x)
+
+            # store pooling res
+            # global_add_pool result shape is (num_unique_graphs_in_batch, feature_dim)
+            # concatenate with the GPNN result vector
+            gnn_layer_global_add_pool_res[t,:,:] = global_add_pool(x, batch)
+
+        gamma = gpnn_layer_global_add_pool_res[0,:,:]
+        for t in range(1, self.num_gpnn_layers):
+            gamma = torch.cat((gamma, gpnn_layer_global_add_pool_res[t,:,:]), dim = 1)
+
+        # concatenate the global_add_pools to get resulting GNN vector
+        x = gnn_layer_global_add_pool_res[0,:,:]
+        for t in range(1, self.base_gnn_layers):
+            x = torch.cat((x, gnn_layer_global_add_pool_res[t,:,:]), dim = 1)
+            
+        return self.pool_mlp(torch.cat((x, gamma), dim = 1))
 
 # A manager class for GNNs and partition enhanced GNNs
 class GNN_Manager():
