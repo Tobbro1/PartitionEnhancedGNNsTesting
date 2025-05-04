@@ -203,6 +203,150 @@ import matplotlib.pyplot as plt
 def run_exp():
     raise NotImplementedError
 
+def run_tu_dataset(dataset_str: str, sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]] = None, sp_s_vals: Optional[List[int]] = None, lo_k_vals: Optional[List[int]] = None, lo_r_vals: Optional[List[int]] = None, lo_s_vals: Optional[List[int]] = None, lo_graph_sizes_range: Optional[Tuple[int,int]] = None, lo_num_samples: Optional[Tuple[int,int]] = None, gen_vertex_sp_features: bool = False, root_path: Optional[str] = None, use_editmask: bool = False, re_gen_properties: bool = False) -> None:
+    
+    assert dataset_str in ["NCI1", "ENZYMES", "PROTEINS", "DD"]
+    
+    if root_path is None:
+        root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
+
+    absolute_path_prefix = root_path
+
+    path = osp.join('data', 'TU', dataset_str)
+
+    # select some constant values
+    num_processes = constants.num_processes
+    vector_buffer_size = constants.vector_buffer_size
+
+    result_mmap_path = osp.join(root_path, path, 'results.np')
+    editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
+
+    # Perhaps distinguish between datasets for use_node_attr
+    dataset = TUDataset(name = dataset_str, root = osp.join(absolute_path_prefix, path), use_node_attr = False)
+
+    output_path = osp.join(path, 'results')
+    dataset_prop_filename = "properties.json"
+    lookup_filename = "idx_lookup.pkl"
+    dataset_properties_path = osp.join(output_path, dataset_prop_filename)
+    lookup_path = osp.join(output_path, lookup_filename)
+
+    if not osp.exists(dataset_properties_path) or not osp.exists(lookup_path):
+        re_gen_properties = True
+
+    if re_gen_properties:
+        # Generate dataset properties and lookup files, they are later read and not generated again
+        prop_manager = Dataset_Properties_Manager(properties_path = None, dataset = dataset, node_pred = False, absolute_path_prefix = absolute_path_prefix, write_properties_root_path = output_path, write_properties_filename = dataset_prop_filename)
+        prop_manager.initialize_idx_lookups(lookup_path = None, samples = None, write_lookup_root_path = output_path, write_lookup_filename = lookup_filename)
+
+    dataset_desc = f"TU-{dataset_str}"
+
+    if gen_vertex_sp_features:
+        # Generate Vertex SP features
+
+        vertex_sp_path = osp.join(output_path, f'vertex_SP_features')
+        dataset_write_filename = f"{dataset_str}_vertex_SP_features"
+
+        metadata_filename = f'{dataset_write_filename}_metadata.json'
+
+        chunksize = constants.graph_chunksize
+
+        gen = Vertex_SP_Feature_Generator(dataset = dataset, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = vertex_sp_path, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+        print(f"---   Generating {dataset_str} Vertex SP features   ---")
+        gen.generate_features(write_filename = dataset_write_filename, chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = vertex_sp_path, metadata_filename = metadata_filename, graph_mode = True)
+        print(f"---   Finished generating {dataset_str} Vertex SP features   ---")
+
+    if sp_k_vals is not None and len(sp_k_vals) > 0:
+        for k in sp_k_vals:
+            # Generate k-disk SP feature vectors
+
+            k_disk_sp_path = osp.join(output_path, f'{k}-disk_SP_features')
+            dataset_write_filename = f"{dataset_str}_{k}-disk_SP_features"
+
+            metadata_filename = f'{dataset_write_filename}_metadata.json'
+
+            chunksize = constants.vertex_chunksize
+
+            gen = K_Disk_SP_Feature_Generator(dataset = dataset, k = k, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = k_disk_sp_path, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            print(f"---   Generating {dataset_str} {k}-Disk SP features   ---")
+            gen.generate_features(write_filename = dataset_write_filename, chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = k_disk_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+            print(f"---   Finished generating {dataset_str} {k}-Disk SP features   ---")
+
+    if sp_r_vals is not None and sp_s_vals is not None and len(sp_r_vals) > 0 and len(sp_s_vals) == len(sp_r_vals):
+        for idx in range(len(sp_r_vals)):
+            # Generate r-s-ring SP feature vectors
+
+            r = sp_r_vals[idx]
+            s = sp_s_vals[idx]
+
+            if s < r:
+                continue
+
+            r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_SP_features')
+            dataset_write_filename = f"{dataset_str}_{r}-{s}-ring_SP_features"
+
+            metadata_filename = f'{dataset_write_filename}_metadata.json'
+
+            chunksize = constants.vertex_chunksize
+
+            gen = R_S_Ring_SP_Feature_Generator(dataset = dataset, r = r, s = s, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+            print(f"---   Generating {dataset_str} {r}-{s}-Ring SP features   ---")
+            gen.generate_features(write_filename = dataset_write_filename, chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+            print(f"---   Finished generating {dataset_str} {r}-{s}-Ring SP features   ---")
+
+    if lo_k_vals is not None and len(lo_k_vals) > 0:
+        assert lo_graph_sizes_range is not None and lo_graph_sizes_range[0] > 0 and lo_graph_sizes_range[1] > 0 and lo_num_samples is not None
+
+        for k in lo_k_vals:
+            # Generate k-disk SP feature vectors
+            for id in range(constants.num_lo_gens):
+
+                k_disk_sp_path = osp.join(output_path, f'{k}-disk_lo_features')
+
+                if constants.num_lo_gens > 1:
+                    dataset_write_filename = f"{dataset_str}_{k}-disk_lo_features_{id}"
+                else:
+                    dataset_write_filename = f"{dataset_str}_{k}-disk_lo_features"
+
+                metadata_filename = f'{dataset_write_filename}_metadata.json'
+
+                chunksize = constants.vertex_chunksize
+
+                gen = K_Disk_LO_Feature_Generator(dataset = dataset, k = k, lo_graph_sizes_range = lo_graph_sizes_range, lo_s = lo_num_samples, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = k_disk_sp_path, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+                print(f"---   Generating {dataset_str} {k}-Disk Lovasz features   ---")
+                gen.generate_features(write_filename = dataset_write_filename, chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = k_disk_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+                print(f"---   Finished generating {dataset_str} {k}-Disk Lovasz features   ---")
+            
+
+    if lo_r_vals is not None and lo_s_vals is not None and len(lo_r_vals) > 0 and len(lo_s_vals) == len(lo_r_vals):
+        assert lo_graph_sizes_range is not None and lo_graph_sizes_range[0] > 0 and lo_graph_sizes_range[1] > 0 and lo_num_samples is not None
+
+        for idx in range(len(lo_r_vals)):
+            # Generate r-s-ring SP feature vectors
+
+            r = lo_r_vals[idx]
+            s = lo_s_vals[idx]
+
+            if s < r:
+                continue
+
+            for id in range(constants.num_lo_gens):
+
+                r_s_ring_sp_path = osp.join(output_path, f'{r}-{s}-ring_lo_features')
+
+                if constants.num_lo_gens > 1:
+                    dataset_write_filename = f"{dataset_str}_{r}-{s}-ring_lo_features_{id}"
+                else:
+                    dataset_write_filename = f"{dataset_str}_{r}-{s}-ring_lo_features"
+
+                metadata_filename = f'{dataset_write_filename}_metadata.json'
+
+                chunksize = constants.vertex_chunksize
+
+                gen = R_S_Ring_LO_Feature_Generator(dataset = dataset, r = r, s = s, lo_graph_sizes_range = lo_graph_sizes_range, lo_s = lo_num_samples, node_pred = False, samples = None, absolute_path_prefix = absolute_path_prefix, dataset_write_path = r_s_ring_sp_path, dataset_desc = dataset_desc, use_editmask = use_editmask, result_mmap_dest = result_mmap_path, editmask_mmap_dest = editmask_mmap_path, properties_path = dataset_properties_path, idx_lookup_path = lookup_path)
+                print(f"---   Generating {dataset_str} {r}-{s}-Ring Lovasz features   ---")
+                gen.generate_features(write_filename = dataset_write_filename, chunksize = chunksize, vector_buffer_size = vector_buffer_size, num_processes = num_processes, log_times = False, metadata_path = r_s_ring_sp_path, metadata_filename = metadata_filename, graph_mode = False)
+                print(f"---   Finished generating {dataset_str} {r}-{s}-Ring Lovasz features   ---")
+
 def run_ppa(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]] = None, sp_s_vals: Optional[List[int]] = None, lo_k_vals: Optional[List[int]] = None, lo_r_vals: Optional[List[int]] = None, lo_s_vals: Optional[List[int]] = None, lo_graph_sizes_range: Optional[Tuple[int,int]] = None, lo_num_samples: Optional[Tuple[int,int]] = None, gen_vertex_sp_features: bool = False, root_path: Optional[str] = None, use_editmask: bool = False, re_gen_properties: bool = False) -> None:
     
     if root_path is None:
@@ -212,14 +356,14 @@ def run_ppa(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]
 
     path = osp.join('data', 'OGB')
 
+    path = osp.join(path, 'PPA')
+
     # select some constant values
     num_processes = constants.num_processes
     vector_buffer_size = constants.vector_buffer_size
 
     result_mmap_path = osp.join(root_path, path, 'results.np')
     editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
-
-    path = osp.join(path, 'PPA')
 
     dataset_ppa = PygGraphPropPredDataset(name = 'ogbg-ppa', root = osp.join(absolute_path_prefix, path))
 

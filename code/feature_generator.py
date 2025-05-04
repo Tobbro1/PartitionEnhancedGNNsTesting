@@ -251,7 +251,6 @@ class Feature_Generator():
         else:
             feature_compute_func = self.compute_feature
 
-        # Store the time results
         for res in tqdm.tqdm(pool.imap_unordered(feature_compute_func, samples, chunksize = chunksize), total = len(samples)):
             if graph_mode:
                 # The tasks are scheduled for whole graphs instead of vertices

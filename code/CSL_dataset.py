@@ -91,6 +91,13 @@ class CSL_Dataset(InMemoryDataset):
         if path is not None:
             splits = util.read_metadata_file(path = path)
         else:
+            # check whether a splits file exists at the default path
+            def_path = osp.join(self.root, "splits")
+            def_filename = "splits.json"
+            if osp.exists(osp.join(def_path, def_filename)):
+                splits = util.read_metadata_file(osp.join(def_path, def_filename))
+                return splits
+
             # generate test data
 
             # We follow the split setup from https://proceedings.mlr.press/v97/murphy19a/murphy19a.pdf
@@ -156,6 +163,9 @@ class CSL_Dataset(InMemoryDataset):
 
             if write_path is not None:
                 self.write_train_val_split(splits = splits, path = write_path, filename = write_filename)
+
+            # Write generated splits to default location
+            util.write_metadata_file(path = def_path, filename = def_filename, data = splits)
 
         return splits
 

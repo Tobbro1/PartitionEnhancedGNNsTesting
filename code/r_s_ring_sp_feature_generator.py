@@ -10,7 +10,7 @@ import numpy as np
 
 # import own functionality
 from feature_generator import Feature_Generator, TimeLoggingEvent
-from util import gen_r_s_ring
+from util import gen_r_s_ring, one_hot_to_labels
 import SP_features as spf
 
 class R_S_Ring_SP_Feature_Generator(Feature_Generator):
@@ -90,8 +90,10 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
         #run floyd warshall on the k disk to compute a distances matrix
         floyd_warshall_distances = self.sp_features.floyd_warshall(graph = r_s_ring)
 
+        x = one_hot_to_labels(r_s_ring.x)
+
         #compute a dictionary representing the sp distances in the k disk
-        sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = r_s_ring.x)
+        sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = x)
         result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = vertex_identifier)
 
         database_idx = self.prop_manager.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier)
@@ -129,9 +131,11 @@ class R_S_Ring_SP_Feature_Generator(Feature_Generator):
         floyd_warshall_time = time.time() - floyd_warshall_start
         self.log_time(event= TimeLoggingEvent.floyd_warshall, value = floyd_warshall_time)
 
+        x = one_hot_to_labels(r_s_ring.x)
+
         #compute a dictionary representing the sp distances in the k disk
         sp_map_start = time.time()
-        sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = r_s_ring.x)
+        sp_map = self.sp_features.sp_feature_map(distances = floyd_warshall_distances, x = x)
         result, editmask_res = self.sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = tuple([graph_id, vertex_id]))
         sp_map_time = time.time() - sp_map_start
         self.log_time(event = TimeLoggingEvent.SP_vector_computation, value = sp_map_time)
@@ -162,8 +166,10 @@ def compute_single_r_s_ring_sp_feature_vector(graph: Data, vertex_id: int, r: in
     #run floyd warshall on the k disk to compute a distances matrix
     floyd_warshall_distances = sp_features.floyd_warshall(graph = r_s_ring)
 
+    x = one_hot_to_labels(r_s_ring.x)
+
     #compute a dictionary representing the sp distances in the k disk
-    sp_map = sp_features.sp_feature_map(distances = floyd_warshall_distances, x = r_s_ring.x)
+    sp_map = sp_features.sp_feature_map(distances = floyd_warshall_distances, x = x)
     result, _ = sp_features.sp_feature_vector_from_feature_map(dict = sp_map, vertex_identifier = vertex_identifier)
 
     return result[2:], time.time() - t0

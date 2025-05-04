@@ -14,7 +14,7 @@ from torch_geometric.data.data import DataEdgeAttr, DataTensorAttr
 from torch_geometric.data.storage import GlobalStorage
 
 from experiments import Experiment_Manager
-from vertex_partition_feature_generation_main import run_csl, run_proximity, run_molhiv, run_ppa
+from vertex_partition_feature_generation_main import run_csl, run_proximity, run_molhiv, run_ppa, run_tu_dataset
 
 # Defines an example config file for a run and creates it
 def gen_experiment_config_file(root_path: str) -> None:
@@ -39,8 +39,9 @@ def gen_experiment_config_file(root_path: str) -> None:
     config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
     config["general"]["mbk_max_iter"] = constants.mbk_max_iter
     config["dataset"] = {}
-    config["dataset"]["dataset_str"] = "---   'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
+    config["dataset"]["use_gpnn"] = False
     config["dataset"]["feature_type"] = "---   'sp' or 'lo', only utilised for k-disks or r-s-rings   ---"
     config["dataset"]["lo_feature_idx"] = "---   Index of the Lovasz features that should be utilised, use '0' if only one feature has been generated. Ignored if feature_type is not 'lo'   ---"
     config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
@@ -57,6 +58,8 @@ def gen_experiment_config_file(root_path: str) -> None:
     config["hyperparameters"]["num_batch_sizes"] = ["---   Defines the batch sizes of gnns while training   ---"]
     config["hyperparameters"]["num_epochs"] = ["---   List of the number of epochs while training gnns that will be evaluated   ---"]
     config["hyperparameters"]["lrs"] = ["---   List of the learning rates that will be evaluated   ---"]
+    config["hyperparameters"]["num_gpnn_layer"] = ["---   List of the number of layers of gpnns that will be evaluated   ---"]
+    config["hyperparameters"]["gpnn_channels"] = ["---   List of the gpnn feature dimensions that will be evaluated   ---"]
 
     util.write_metadata_file(path = path, filename = filename, data = config)
 
@@ -88,6 +91,10 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     exp_mode = -1 # 0 -> classical, 1 -> clustering, 2 -> enhanced, 3 -> full
     is_lovasz_feature = False
     lo_idx_str = ""
+
+    use_gpnn = False
+    gpnn_channels = []
+    gpnn_layers = []
 
     prev_result_path = None
 
@@ -167,11 +174,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     for key, value in config["dataset"].items():
         if key == "dataset_str":
             assert isinstance(value, str)
-            if value == 'ogbg-molhiv':
-                dataset_str = value
-            elif value == 'ogbg-ppa':
-                dataset_str = value
-            elif value == 'CSL':
+            if value in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL']:
                 dataset_str = value
             elif value.endswith('-Prox'):
                 h = int(value[0])
@@ -221,6 +224,9 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
             assert isinstance(value, str)
             assert value == 'gin' or value == 'gcn'
             base_model = value
+        elif key == "use_gpnn":
+            assert isinstance(value, bool)
+            use_gpnn = value
         else:
             raise ValueError(f'Invalid key {key} in config["dataset"]')
         
@@ -264,6 +270,14 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
             assert len(value) > 0
             assert [x > 0 for x in value]
             lrs = value
+        elif key == "num_gpnn_layer":
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            gpnn_layers = value
+        elif key == "gpnn_channels":
+            assert len(value) > 0
+            assert [x > 0 for x in value]
+            gpnn_channels = value
         else:
             raise ValueError(f'Invalid key {key} in config["hyperparameters"]')
         
@@ -273,7 +287,8 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     manager = Experiment_Manager(root_path = root_path)
 
     try:
-        manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
+        manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, use_gpnn = use_gpnn, gpnn_channels = gpnn_channels, gpnn_layers = gpnn_layers,
+                                  is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
                                     pca_dims = pca_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
                                     num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, exp_mode = exp_mode, max_patience = constants.max_patience, lo_idx_str = lo_idx_str,
                                     prev_res_path = prev_result_path)
@@ -314,7 +329,7 @@ def gen_feature_gen_config_file(root_path: str) -> None:
     config["general"]["vector_buffer_size"] = constants.vector_buffer_size
     config["general"]["num_lo_gen"] = constants.num_lo_gens
     config["dataset"] = {}
-    config["dataset"]["dataset_str"] = "---   'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["sp"] = {}
     config["dataset"]["sp"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
     config["dataset"]["sp"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
@@ -384,11 +399,7 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
     for key, value in config["dataset"].items():
         if key == "dataset_str":
             assert isinstance(value, str)
-            if value == 'ogbg-molhiv':
-                dataset_str = value
-            elif value == 'ogbg-ppa':
-                dataset_str = value
-            elif value == 'CSL':
+            if value in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL']:
                 dataset_str = value
             elif value.endswith('-Prox'):
                 h = int(value[0])
@@ -477,7 +488,9 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
 
     util.initialize_random_seeds(constants.SEED)
 
-    if dataset_str == 'ogbg-molhiv':
+    if dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+        run_tu_dataset(dataset_str = dataset_str, sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
+    elif dataset_str == 'ogbg-molhiv':
         run_molhiv(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
     elif dataset_str == 'ogbg-ppa':
         run_ppa(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)

@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from torch_geometric.data import Data
+from torch_geometric.data import Data, Dataset
 import torch_geometric.utils
 
 #import for the r_s_ring_subgraph implementation
@@ -130,6 +130,15 @@ def gen_r_s_ring(r: int, s: int, graph_data: Data, vertex: int) -> Data:
     _subset, _edge_index, _, _ = r_s_ring_subgraph(node_idx=vertex, r=r, s=s, edge_index=graph_data.edge_index, relabel_nodes=True, num_nodes = graph_data.num_nodes)
     return Data(x=graph_data.x[_subset], edge_index=_edge_index)
 
+def one_hot_to_labels(x: Tensor) -> Tensor:
+    #if the features are not labels they are assumed to be a one-hot encoding
+    if x.dim() > 1 and x.size()[1] > 1:
+        assert (x.sum(dim=-1) == 1).sum() == x.size(0)
+        x = x.argmax(dim=-1).to(dtype = torch.long)  # one-hot -> integer.
+    assert x.dtype == torch.long
+
+    return x
+
 def read_metadata_file(path: str):
     if not osp.exists(path):
         raise FileNotFoundError
@@ -190,3 +199,56 @@ def read_pickle(path: str):
         res = pickle.load(file = f)
 
     return res
+
+def generate_tu_splits(root_path: str, dataset_path: str, dataset: Dataset, split_path: Optional[str] = None):
+    splits = {}
+
+    if split_path is not None:
+        splits = read_metadata_file(path = split_path)
+    else:
+        # check whether a splits file exists at the default path
+        def_path = osp.join(osp.join(root_path, dataset_path), "splits")
+        def_filename = "splits.json"
+        if osp.exists(osp.join(def_path, def_filename)):
+            splits = read_metadata_file(osp.join(def_path, def_filename))
+            return splits
+
+        # generate test data, we sample test data according to the specified settings uniformly at random before generating the folds
+        k = constants.num_k_fold
+
+        for idx in range(k):
+            splits[idx] = {}
+            splits[idx]["test"] = [] # Note that the test set is the same for each fold, we store it multiple times to be consistent with the Prox Dataset splits
+            splits[idx]["train"] = []
+            splits[idx]["val"] = []
+
+            num_graphs = dataset.len()
+
+            total_indices = np.array(range(num_graphs), dtype = np.int64)
+            num_test_graphs = int(constants.k_fold_test_ratio * num_graphs)
+            possible_indices = total_indices.copy()
+            test_indices = np.random.choice(possible_indices, size = num_test_graphs, replace = False)
+            test_indices_list = test_indices.tolist()
+
+            # generate k folds
+            fold_elements = np.delete(total_indices, test_indices)
+            num_remaining_graphs = fold_elements.shape[0]
+            num_select = int(num_remaining_graphs / k)
+
+            for idx in range(k):
+                splits[idx]["test"].extend(test_indices_list)
+
+                val_elements = np.random.choice(fold_elements, size = num_select, replace = False)
+                splits[idx]["train"].extend(np.delete(fold_elements, np.isin(fold_elements, val_elements)).tolist())
+                splits[idx]["val"].extend(val_elements.tolist())
+
+        # sort
+        for idx in range(k):
+            splits[idx]["train"].sort()
+            splits[idx]["val"].sort()
+            splits[idx]["test"].sort()
+
+        # Write generated splits to default location
+        write_metadata_file(path = def_path, filename = def_filename, data = splits)
+
+    return splits

@@ -140,10 +140,8 @@ class Dataset_Properties_Manager():
                     # Remove duplicates added
                     self.properties["label_alphabet"] = list(set(self.properties["label_alphabet"]))
                 elif dataset.num_features > 1:
-                    # Untested
-
                     # Assumed to be one-hot encoding
-                    unique_labels_tensor = torch.unique(input = cur_graph.x, sorted = False, dim = 1)
+                    unique_labels_tensor = torch.unique(input = cur_graph.x, sorted = False, dim = 0)
                     num_new_labels = unique_labels_tensor.size(dim = 0)
 
                     if num_new_labels < min_labels:

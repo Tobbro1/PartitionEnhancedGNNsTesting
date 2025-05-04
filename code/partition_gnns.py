@@ -1000,7 +1000,7 @@ class GNN_Manager():
 
         self.clustering_labels = None
         self.num_features = -1
-        self.num_classes = -1
+        self.out_channels = -1
 
         self.device = constants.device
 
@@ -1019,6 +1019,8 @@ class GNN_Manager():
         self.metadata["optimizer"] = {}
         self.metadata["optimizer"]["desc"] = ""
         self.metadata["optimizer"]["lr"] = -1.0
+        self.metadata["gpnn"] = {}
+        self.metadata["gpnn"]["desc"] = "unused"
         self.metadata["gnn"] = {}
         self.metadata["gnn"]["desc"] = ""
         self.metadata["gnn"]["model_id"] = -1
@@ -1027,6 +1029,7 @@ class GNN_Manager():
         self.metadata["gnn"]["config"]["in_channels"] = -1
         self.metadata["gnn"]["config"]["hidden_channels"] = -1
         self.metadata["gnn"]["config"]["out_channels"] = -1
+        self.metadata["gnn"]["config"]["use_batch_norm"] = False
         self.metadata["gnn"]["parameters"] = {}
         self.metadata["gnn"]["parameters"]["num_total"] = -1
         self.metadata["gnn"]["parameters"]["dtype"] = ""
@@ -1040,6 +1043,8 @@ class GNN_Manager():
         self.metadata["optimizer"] = {}
         self.metadata["optimizer"]["desc"] = ""
         self.metadata["optimizer"]["lr"] = -1.0
+        self.metadata["gpnn"] = {}
+        self.metadata["gpnn"]["desc"] = "unused"
         self.metadata["gnn"] = {}
         self.metadata["gnn"]["desc"] = ""
         self.metadata["gnn"]["model_id"] = -1
@@ -1048,6 +1053,7 @@ class GNN_Manager():
         self.metadata["gnn"]["config"]["in_channels"] = -1
         self.metadata["gnn"]["config"]["hidden_channels"] = -1
         self.metadata["gnn"]["config"]["out_channels"] = -1
+        self.metadata["gnn"]["config"]["use_batch_norm"] = False
         self.metadata["gnn"]["parameters"] = {}
         self.metadata["gnn"]["parameters"]["num_total"] = -1
         self.metadata["gnn"]["parameters"]["dtype"] = ""
@@ -1063,15 +1069,52 @@ class GNN_Manager():
 
         self.num_features = num_features
         self.num_clusters = num_clusters
-        self.num_classes = num_classes
+        self.out_channels = num_classes
+
+    def generate_GPNN_model(self, num_gpnn_layers: int, gpnn_channels: int, base_gnn_str: str, num_gnn_layers: int, gnn_hidden_channels: int, lr: float) -> None:
+        assert base_gnn_str == 'gcn' or base_gnn_str == 'gin'
+        assert self.num_features > 0 and self.out_channels > 0 and self.num_clusters > 0
+
+        self.model = GPNN(num_gpnn_layers = num_gpnn_layers,
+                          gpnn_channels = gpnn_channels,
+                          num_classes = self.num_clusters,
+                          base_gnn = base_gnn_str,
+                          base_gnn_layers = num_gnn_layers,
+                          base_gnn_in_channels = self.num_features,
+                          base_gnn_hidden_channels = gnn_hidden_channels,
+                          out_channels = self.out_channels,
+                          use_batch_norm = constants.use_batch_norm
+                          ).to(self.device)
+        
+        self.metadata["gnn"]["desc"] = base_gnn_str
+        if base_gnn_str == 'gin':
+            self.metadata["gpnn"]["desc"] = "gin-GPNN"
+            self.metadata["gnn"]["model_id"] = 1
+        elif base_gnn_str == 'gcn':
+            self.metadata["gpnn"]["desc"] = "gcn-GPNN"
+            self.metadata["gnn"]["model_id"] = 3
+        self.metadata["gnn"]["config"]["num_layers"] = num_gnn_layers
+        self.metadata["gnn"]["config"]["in_channels"] = self.num_features
+        self.metadata["gnn"]["config"]["hidden_channels"] = gnn_hidden_channels
+        self.metadata["gnn"]["config"]["use_batch_norm"] = constants.use_batch_norm
+        
+        self.metadata["gpnn"]["config"] = {}
+        self.metadata["gpnn"]["config"]["num_layers"] = num_gpnn_layers
+        self.metadata["gpnn"]["config"]["gpnn_channels"] = gpnn_channels
+        self.metadata["gpnn"]["config"]["out_channels"] = self.out_channels
+        self.metadata["gpnn"]["parameters"] = self.model.parameter_props
+
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr = lr)
+        self.metadata["optimizer"]["desc"] = "adam"
+        self.metadata["optimizer"]["lr"] = lr
 
     def generate_partition_enhanced_GIN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.num_features > 0 and self.num_classes > 0 and self.num_clusters > 0
+        assert self.num_features > 0 and self.out_channels > 0 and self.num_clusters > 0
 
         self.model = Partition_enhanced_GIN(
             in_channels = self.num_features,
             hidden_channels = hidden_channels,
-            out_channels =  self.num_classes,
+            out_channels =  self.out_channels,
             num_layers = num_layers,
             num_clusters = self.num_clusters,
             use_batch_norm = constants.use_batch_norm
@@ -1082,7 +1125,8 @@ class GNN_Manager():
         self.metadata["gnn"]["config"]["num_layers"] = num_layers
         self.metadata["gnn"]["config"]["in_channels"] = self.num_features
         self.metadata["gnn"]["config"]["hidden_channels"] = hidden_channels
-        self.metadata["gnn"]["config"]["out_channels"] = self.num_classes
+        self.metadata["gnn"]["config"]["out_channels"] = self.out_channels
+        self.metadata["gnn"]["config"]["use_batch_norm"] = constants.use_batch_norm
         self.metadata["gnn"]["parameters"] = self.model.parameter_props
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr = lr)
@@ -1090,12 +1134,12 @@ class GNN_Manager():
         self.metadata["optimizer"]["lr"] = lr
 
     def generate_classic_GIN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.num_features > 0 and self.num_classes > 0
+        assert self.num_features > 0 and self.out_channels > 0
 
         self.model = GIN_Classic(
             in_channels = self.num_features,
             hidden_channels = hidden_channels,
-            out_channels =  self.num_classes,
+            out_channels =  self.out_channels,
             num_layers = num_layers,
             use_batch_norm = constants.use_batch_norm
         ).to(self.device)
@@ -1105,7 +1149,8 @@ class GNN_Manager():
         self.metadata["gnn"]["config"]["num_layers"] = num_layers
         self.metadata["gnn"]["config"]["in_channels"] = self.num_features
         self.metadata["gnn"]["config"]["hidden_channels"] = hidden_channels
-        self.metadata["gnn"]["config"]["out_channels"] = self.num_classes
+        self.metadata["gnn"]["config"]["out_channels"] = self.out_channels
+        self.metadata["gnn"]["config"]["use_batch_norm"] = constants.use_batch_norm
         self.metadata["gnn"]["parameters"] = self.model.parameter_props
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr = lr)
@@ -1113,12 +1158,12 @@ class GNN_Manager():
         self.metadata["optimizer"]["lr"] = lr
 
     def generate_partition_enhanced_GCN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.num_features > 0 and self.num_classes > 0 and self.num_clusters > 0
+        assert self.num_features > 0 and self.out_channels > 0 and self.num_clusters > 0
 
         self.model = Partition_enhanced_GCN(
             in_channels = self.num_features,
             hidden_channels = hidden_channels,
-            out_channels =  self.num_classes,
+            out_channels =  self.out_channels,
             num_layers = num_layers,
             num_clusters = self.num_clusters,
             use_batch_norm = constants.use_batch_norm
@@ -1129,9 +1174,10 @@ class GNN_Manager():
         self.metadata["gnn"]["config"]["num_layers"] = num_layers
         self.metadata["gnn"]["config"]["in_channels"] = self.num_features
         self.metadata["gnn"]["config"]["hidden_channels"] = hidden_channels
-        self.metadata["gnn"]["config"]["out_channels"] = self.num_classes
+        self.metadata["gnn"]["config"]["out_channels"] = self.out_channels
         self.metadata["gnn"]["config"]["normalize"] = True
         self.metadata["gnn"]["config"]["use_bias"] = True
+        self.metadata["gnn"]["config"]["use_batch_norm"] = constants.use_batch_norm
         self.metadata["gnn"]["parameters"] = self.model.parameter_props
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr = lr)
@@ -1139,12 +1185,12 @@ class GNN_Manager():
         self.metadata["optimizer"]["lr"] = lr
 
     def generate_classic_GCN_model(self, hidden_channels: int, num_layers: int, lr: float) -> None:
-        assert self.num_features > 0 and self.num_classes > 0
+        assert self.num_features > 0 and self.out_channels > 0
 
         self.model = GCN_Classic(
             in_channels = self.num_features,
             hidden_channels = hidden_channels,
-            out_channels =  self.num_classes,
+            out_channels =  self.out_channels,
             num_layers = num_layers,
             use_batch_norm = constants.use_batch_norm
         ).to(self.device)
@@ -1154,9 +1200,10 @@ class GNN_Manager():
         self.metadata["gnn"]["config"]["num_layers"] = num_layers
         self.metadata["gnn"]["config"]["in_channels"] = self.num_features
         self.metadata["gnn"]["config"]["hidden_channels"] = hidden_channels
-        self.metadata["gnn"]["config"]["out_channels"] = self.num_classes
+        self.metadata["gnn"]["config"]["out_channels"] = self.out_channels
         self.metadata["gnn"]["config"]["normalize"] = True
         self.metadata["gnn"]["config"]["use_bias"] = True
+        self.metadata["gnn"]["config"]["use_batch_norm"] = constants.use_batch_norm
         self.metadata["gnn"]["parameters"] = self.model.parameter_props
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr = lr)
@@ -1213,7 +1260,7 @@ class GNN_Manager():
 
 #     return total_correct/len(test_loader.dataset)
 
-# #Test zone
+#Test zone
 # if __name__ == '__main__':
 
 #     # reproducability
@@ -1236,24 +1283,24 @@ class GNN_Manager():
 #     for param in params:
 #         print(type(param), param.size())
 
-#     # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
-#     # mutag_path = osp.join(path, "MUTAG")
-#     # dd_path = osp.join(path, "DD")
-#     # mutag_dataset_filename = "k_disk_SP_features_MUTAG.svmlight"
-#     # dd_dataset_filename = "k_disk_SP_features_DD.svmlight"
-#     # dataset_path = osp.join(path, mutag_path, mutag_dataset_filename)
-#     # # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels.txt')
-#     # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels_zero.txt')
+    # path = osp.join(osp.abspath(osp.dirname(__file__)), 'data', 'TU')
+    # mutag_path = osp.join(path, "MUTAG")
+    # dd_path = osp.join(path, "DD")
+    # mutag_dataset_filename = "k_disk_SP_features_MUTAG.svmlight"
+    # dd_dataset_filename = "k_disk_SP_features_DD.svmlight"
+    # dataset_path = osp.join(path, mutag_path, mutag_dataset_filename)
+    # # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels.txt')
+    # clusterlabels_path = osp.join(path, mutag_path, 'cluster_labels_zero.txt')
 
-#     # gnn_generator.read_clustering_labels(path = clusterlabels_path)
-#     # # NOTE: force_reload needs to be set to True in order to update the clustering information in the dataset. When re-running the program with identical settings it may be left False. Otherwise read_clustering_labels does not apply the update leading to potentially incorrect, thus unpredictable behaviour
-#     # gnn_generator.load_dataset(root_path=osp.join(path, 'enhanced_gnn'), dataset_name = 'MUTAG', force_reload = True)
+    # gnn_generator.read_clustering_labels(path = clusterlabels_path)
+    # # NOTE: force_reload needs to be set to True in order to update the clustering information in the dataset. When re-running the program with identical settings it may be left False. Otherwise read_clustering_labels does not apply the update leading to potentially incorrect, thus unpredictable behaviour
+    # gnn_generator.load_dataset(root_path=osp.join(path, 'enhanced_gnn'), dataset_name = 'MUTAG', force_reload = True)
 
-#     # batch_size = 128
-#     # hidden_channels = 32
-#     # num_layers = 3
-#     # lr = 0.01
-#     # epochs = 100
+    # batch_size = 128
+    # hidden_channels = 32
+    # num_layers = 3
+    # lr = 0.01
+    # epochs = 100
 
 #     # # Test the GIN
 #     # print("Testing GIN: ")

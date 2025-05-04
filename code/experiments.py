@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Dataset
+from torch_geometric.datasets import TUDataset
 
 from clustering import Vertex_Partition_Clustering
 import util
@@ -71,6 +72,12 @@ class Experiment_Manager():
         self.classical_gnn_hyperparameter_experiment_res_path = None
         self.clustering_hyperparameter_experiment_res_path = None
 
+        self.base_model = ""
+
+        self.use_gpnn = False
+        self.gpnn_layers = []
+        self.gpnn_channels = []
+
         # Note for hyperparameter optimization: first the gnn props are trained without clustering (num_layers, hidden_channels, batch_size, num_epochs, lr)
         #                                       then, the clustering parameters are trained with the learned gnn parameters (k, r, s, num_clusters, pca_dim)
 
@@ -92,7 +99,8 @@ class Experiment_Manager():
     # Initialize variables, set hyperparameter ranges that need to be evaluated
     # base_model: one of 'gin' or 'gcn'
     # dataset_str: one of 'CSL' or h-Prox for any integer h from [1,3,5,8,10]
-    def setup_experiments(self, dataset_str: str, base_model: str = 'gin', is_lovasz_feature: bool = False, lo_idx_str: str = "", k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
+    def setup_experiments(self, dataset_str: str, base_model: str = 'gin', use_gpnn: bool = False, gpnn_channels: List[int] = None, gpnn_layers: List[int] = None, is_lovasz_feature: bool = False, 
+                          lo_idx_str: str = "", k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
                           num_clusters: List[int] = None, pca_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
                           hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, exp_mode: int = -1, max_patience: Optional[int] = None,
                           prev_res_path: Optional[str] = None):
@@ -115,6 +123,11 @@ class Experiment_Manager():
         self.is_lovasz_feature = is_lovasz_feature
         self.lo_idx_str = lo_idx_str
         self.normalize_features = normalize_features
+        self.base_model = base_model
+
+        self.use_gpnn = use_gpnn
+        self.gpnn_layers = gpnn_layers
+        self.gpnn_channels = gpnn_channels
 
         if max_patience is not None:
             self.max_patience = max_patience
@@ -122,10 +135,16 @@ class Experiment_Manager():
         if base_model == 'gin':
             # Set up the functions to generate GNNs
             self.load_classic_gnn = self.gnn.generate_classic_GIN_model
-            self.load_enhanced_gnn = self.gnn.generate_partition_enhanced_GIN_model
+            if self.use_gpnn:
+                self.load_enhanced_gnn = self.gnn.generate_GPNN_model
+            else:
+                self.load_enhanced_gnn = self.gnn.generate_partition_enhanced_GIN_model
         elif base_model == 'gcn':
             self.load_classic_gnn = self.gnn.generate_classic_GCN_model
-            self.load_enhanced_gnn = self.gnn.generate_partition_enhanced_GCN_model
+            if self.use_gpnn:
+                self.load_enhanced_gnn = self.gnn.generate_GPNN_model
+            else:
+                self.load_enhanced_gnn = self.gnn.generate_partition_enhanced_GCN_model
         else:
             raise ValueError('Invalid gnn string')
         
@@ -133,6 +152,7 @@ class Experiment_Manager():
 
         assert exp_mode > -1
 
+        
         if dataset_str == 'ogbg-ppa':
             self.dataset_path = osp.join('data', 'OGB', 'PPA')
             if exp_mode == 0: # classical
@@ -141,7 +161,7 @@ class Experiment_Manager():
                 assert prev_res_path is not None
                 self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_clustering_ogb_experiment
-            elif exp_mode == 2: # enhanced GNN
+            elif exp_mode == 2: # enhanced model
                 assert prev_res_path is not None
                 self.clustering_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_ogb_enhanced_gnn_experiment
@@ -156,22 +176,32 @@ class Experiment_Manager():
                 assert prev_res_path is not None
                 self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_clustering_ogb_experiment
-            elif exp_mode == 2: # enhanced GNN
+            elif exp_mode == 2: # enhanced model
                 assert prev_res_path is not None
                 self.clustering_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_ogb_enhanced_gnn_experiment
             elif exp_mode == 3: # full
                 self.run_experiments = self.run_ogb_experiments
             self.criterion = torch.nn.BCEWithLogitsLoss()
-        elif dataset_str == 'CSL':
-            self.dataset_path = osp.join('data', 'CSL', 'CSL_dataset')
+        elif dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'CSL']:
+            if dataset_str == 'CSL':
+                self.dataset_path = osp.join('data', 'CSL', 'CSL_dataset')
+            elif dataset_str == 'PROTEINS':
+                self.dataset_path = osp.join('data', 'TU', 'PROTEINS')
+            elif dataset_str == 'ENZYMES':
+                self.dataset_path = osp.join('data', 'TU', 'ENZYMES')
+            elif dataset_str == 'NCI1':
+                self.dataset_path = osp.join('data', 'TU', 'NCI1')
+            elif dataset_str == 'DD':
+                self.dataset_path = osp.join('data', 'TU', 'DD')
+
             if exp_mode == 0: # classical
                 self.run_experiments = self.run_classical_csl_prox_experiments
             elif exp_mode == 1: # clustering
                 assert prev_res_path is not None
                 self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_clustering_csl_prox_experiment
-            elif exp_mode == 2: # enhanced GNN
+            elif exp_mode == 2: # enhanced model
                 assert prev_res_path is not None
                 self.clustering_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_csl_prox_enhanced_gnn_experiment
@@ -187,7 +217,7 @@ class Experiment_Manager():
                 assert prev_res_path is not None
                 self.classical_gnn_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_clustering_csl_prox_experiment
-            elif exp_mode == 2: # enhanced GNN
+            elif exp_mode == 2: # enhanced model
                 assert prev_res_path is not None
                 self.clustering_hyperparameter_experiment_res_path = prev_res_path
                 self.run_experiments = self.run_csl_prox_enhanced_gnn_experiment
@@ -288,16 +318,20 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+            # TU dataset
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
         if self.dataset_str == 'CSL':
             dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
             dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
-
-        splits = dataset.gen_data_splits()
+            splits = dataset.gen_data_splits()
 
         # Optimize GNN hyperparameters without clustering first
         print('---   Optimizing classical GNN hyperparameters   ---')
-        hyperparameter_opt_data, best_val_accs, best_test_accs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = True)
+        hyperparameter_opt_data, best_val_accs, best_test_accs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_tu_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = True)
 
         val_accs = torch.tensor(best_val_accs, dtype = torch.float64)
         test_accs = torch.tensor(best_test_accs, dtype = torch.float64)
@@ -370,7 +404,7 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size, best_gpnn_layers, best_gpnn_channels = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
                                                                                                                                                     hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                     n_epoch = best_classic_n_epoch, lr = best_classic_lr, lo_idx_str = self.lo_idx_str)
 
@@ -402,6 +436,9 @@ class Experiment_Manager():
         data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
         data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"] = osp.join(best_features_path, best_feature_metadata_filename)
         data["res"]["hyperparameter"]["best_clustering_metadata_path"] = best_clustering_path
+        if self.use_gpnn:
+            data["res"]["hyperparameter"]["best_num_gpnn_layers"] = best_gpnn_layers
+            data["res"]["hyperparameter"]["best_gpnn_channels"] = best_gpnn_channels
 
         print(f'---   Val perf: mean: {val_mean}; std: {val_std}   ---')
         print(f'---   Test perf: mean: {test_mean}; std: {test_std}   ---')
@@ -437,12 +474,17 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
-        if self.dataset_str == 'CSL':
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+            # TU dataset
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
+        elif self.dataset_str == 'CSL':
             dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
             dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+            splits = dataset.gen_data_splits()
 
-        splits = dataset.gen_data_splits()
 
         # Optimize cluster hyperparameter
         clusterer = Vertex_Partition_Clustering(self.root_path)
@@ -450,7 +492,7 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size, best_gpnn_layers, best_gpnn_channels = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
                                                                                                                                                        hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                        n_epoch = best_classic_n_epoch, lr = best_classic_lr, splits = splits, loss_func = loss_func, lo_idx_str = self.lo_idx_str)
 
@@ -485,6 +527,9 @@ class Experiment_Manager():
         data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
         data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"] = osp.join(best_features_path, best_feature_metadata_filename)
         data["res"]["hyperparameter"]["best_clustering_metadata_paths"] = best_clustering_paths
+        if self.use_gpnn:
+            data["res"]["hyperparameter"]["best_num_gpnn_layers"] = best_gpnn_layers
+            data["res"]["hyperparameter"]["best_gpnn_channels"] = best_gpnn_channels
 
         print('---   Optimizing clustering hyperparameters complete   ---')
 
@@ -502,6 +547,12 @@ class Experiment_Manager():
         max_num_clusters = clustering_experiment_data["res"]["hyperparameter"]["max_num_clusters"]
         vertex_feature_metadata_path = clustering_experiment_data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"]
         best_clustering_metadata_path = clustering_experiment_data["res"]["hyperparameter"]["best_clustering_metadata_path"]
+        if self.use_gpnn:
+            best_gpnn_layers = clustering_experiment_data["res"]["hyperparameter"]["best_num_gpnn_layers"]
+            best_gpnn_channels = clustering_experiment_data["res"]["hyperparameter"]["best_gpnn_channels"]
+        else:
+            best_gpnn_layers = None
+            best_gpnn_channels = None
 
         print(f'---   Starting experiments on {self.dataset_str}   ---')
 
@@ -519,7 +570,7 @@ class Experiment_Manager():
 
         print('---   Running hyperparameter optimization for enhanced GNN   ---')
         # Re-train enhanced gnn hyperparameter using clustering hyperparameter
-        enhanced_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = False, best_clustering_path = best_clustering_metadata_path, best_num_clusters = max_num_clusters, vertex_feature_metadata_path = vertex_feature_metadata_path)
+        enhanced_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = False, best_clustering_path = best_clustering_metadata_path, best_num_clusters = max_num_clusters, vertex_feature_metadata_path = vertex_feature_metadata_path, best_num_gpnn_layers = best_gpnn_layers, best_gpnn_channels = best_gpnn_channels)
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
@@ -562,6 +613,9 @@ class Experiment_Manager():
         data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
         data["res"]["hyperparameter"]["best_pca_dim"] = clustering_experiment_data["res"]["hyperparameter"]["best_pca_dim"]
         data["res"]["hyperparameter"]["best_min_cluster_size"] = clustering_experiment_data["res"]["hyperparameter"]["best_min_cluster_size"]
+        if self.use_gpnn:
+            data["res"]["hyperparameter"]["best_num_gpnn_layers"] = clustering_experiment_data["res"]["hyperparameter"]["best_num_gpnn_layers"]
+            data["res"]["hyperparameter"]["best_num_gpnn_layers"] = clustering_experiment_data["res"]["hyperparameter"]["best_gpnn_channels"]
 
         print(f'---   Val perf: mean: {val_mean}; std: {val_std}   ---')
         print(f'---   Test perf: mean: {test_mean}; std: {test_std}   ---')
@@ -580,6 +634,12 @@ class Experiment_Manager():
         max_num_clusters = clustering_experiment_data["res"]["hyperparameter"]["max_num_clusters"]
         vertex_feature_metadata_path = clustering_experiment_data["res"]["hyperparameter"]["best_vertex_feature_metadata_path"]
         best_clustering_metadata_paths = clustering_experiment_data["res"]["hyperparameter"]["best_clustering_metadata_paths"]
+        if self.use_gpnn:
+            best_gpnn_layers = clustering_experiment_data["res"]["hyperparameter"]["best_num_gpnn_layers"]
+            best_gpnn_channels = clustering_experiment_data["res"]["hyperparameter"]["best_gpnn_channels"]
+        else:
+            best_gpnn_layers = None
+            best_gpnn_channels = None
 
         print(f'---   Starting experiments on {self.dataset_str}   ---')
 
@@ -593,16 +653,20 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
-        if self.dataset_str == 'CSL':
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+            # TU dataset
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
+        elif self.dataset_str == 'CSL':
             dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
             dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
-
-        splits = dataset.gen_data_splits()
+            splits = dataset.gen_data_splits()
 
         print('---   Running hyperparameter optimization for enhanced GNN   ---')
         # Re-train enhanced gnn hyperparameter using clustering hyperparameter
-        enhanced_hyperparameter_opt_data, best_val_accs, best_test_accs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = False, best_clustering_paths = best_clustering_metadata_paths, best_num_clusters = max_num_clusters, best_vertex_feature_metadata_path = vertex_feature_metadata_path)
+        enhanced_hyperparameter_opt_data, best_val_accs, best_test_accs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_tu_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = False, best_clustering_paths = best_clustering_metadata_paths, best_num_clusters = max_num_clusters, best_vertex_feature_metadata_path = vertex_feature_metadata_path, best_num_gpnn_layers = best_gpnn_layers, best_gpnn_channels = best_gpnn_channels)
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
@@ -644,6 +708,9 @@ class Experiment_Manager():
         data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
         data["res"]["hyperparameter"]["best_pca_dim"] = clustering_experiment_data["res"]["hyperparameter"]["best_pca_dim"]
         data["res"]["hyperparameter"]["best_min_cluster_size"] = clustering_experiment_data["res"]["hyperparameter"]["best_min_cluster_size"]
+        if self.use_gpnn:
+            data["res"]["hyperparameter"]["best_num_gpnn_layers"] = clustering_experiment_data["res"]["hyperparameter"]["best_num_gpnn_layers"]
+            data["res"]["hyperparameter"]["best_gpnn_channels"] = clustering_experiment_data["res"]["hyperparameter"]["best_gpnn_channels"]
 
         print(f'---   Val acc: mean: {val_mean}; std: {val_std}   ---')
         print(f'---   Test acc: mean: {test_mean}; std: {test_std}   ---')
@@ -723,7 +790,7 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+        cluster_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_features_path, best_feature_metadata_filename, best_clustering_path, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size, best_gpnn_layers, best_gpnn_channels = self.run_ogb_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
                                                                                                                                                     hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                     n_epoch = best_classic_n_epoch, lr = best_classic_lr, lo_idx_str = self.lo_idx_str)
 
@@ -762,7 +829,7 @@ class Experiment_Manager():
 
         print('---   Running hyperparameter optimization for final enhanced GNN   ---')
         # Re-train enhanced gnn hyperparameter using clustering hyperparameter
-        enhanced_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = False, best_clustering_path = best_clustering_path, best_num_clusters = max_num_clusters, vertex_feature_metadata_path = osp.join(best_features_path, best_feature_metadata_filename))
+        enhanced_hyperparameter_opt_data, best_val_perfs, best_test_perfs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_ogb_gnn_hyperparameter_optimization(classic_gnn = False, best_clustering_path = best_clustering_path, best_num_clusters = max_num_clusters, vertex_feature_metadata_path = osp.join(best_features_path, best_feature_metadata_filename), best_gpnn_channels = best_gpnn_channels, best_num_gpnn_layers = best_gpnn_layers)
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
@@ -805,6 +872,9 @@ class Experiment_Manager():
         data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
         data["res"]["hyperparameter"]["best_pca_dim"] = best_pca_dim
         data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
+        if self.use_gpnn:
+            data["res"]["hyperparameter"]["best_num_gpnn_layers"] = best_gpnn_layers
+            data["res"]["hyperparameter"]["best_gpnn_channels"] = best_gpnn_channels
 
         print(f'---   Val perf: mean: {val_mean}; std: {val_std}   ---')
         print(f'---   Test perf: mean: {test_mean}; std: {test_std}   ---')
@@ -815,7 +885,7 @@ class Experiment_Manager():
 
         self.data.update(data)
 
-    def run_ogb_gnn_hyperparameter_optimization(self, classic_gnn: bool = True, best_clustering_path: Optional[str] = None, best_num_clusters: Optional[int] = None, vertex_feature_metadata_path: Optional[str] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
+    def run_ogb_gnn_hyperparameter_optimization(self, classic_gnn: bool = True, best_clustering_path: Optional[str] = None, best_num_clusters: Optional[int] = None, vertex_feature_metadata_path: Optional[str] = None, best_num_gpnn_layers: Optional[int] = None, best_gpnn_channels: Optional[int] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
         data = {}
 
         num_experiments = (len(self.num_layers) * len(self.hidden_channels) * len(self.batch_sizes) * len(self.num_epochs) * len(self.lrs))
@@ -899,7 +969,10 @@ class Experiment_Manager():
                                 desc_str = f'{self.dataset_str}_classic_{self.model_str}_exp-{cur_experiment_idx}'
                             else:
                                 self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = best_num_clusters)
-                                self.load_enhanced_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
+                                if self.use_gpnn:
+                                    self.load_enhanced_gnn(num_gpnn_layers = best_num_gpnn_layers, gpnn_channels = best_gpnn_channels, gnn_hidden_channels = n_hidden_channels, base_gnn_str = self.base_model, num_gnn_layers = n_layers, lr = lr)
+                                else:
+                                    self.load_enhanced_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
                                 desc_str = f'{self.dataset_str}_enhanced_{self.model_str}_exp-{cur_experiment_idx}/{num_experiments}'
 
                             data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
@@ -1053,6 +1126,8 @@ class Experiment_Manager():
         if self.k is not None and len(self.k) > 0:
             # Use k-disks
             num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.k)
+            if self.use_gpnn:
+                num_experiments *= len(self.gpnn_channels) * len(self.gpnn_layers)
             for k in self.k:
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_lo_features'))
@@ -1078,6 +1153,8 @@ class Experiment_Manager():
         elif self.r is not None and self.s is not None and len(self.r) > 0 and len(self.s) == len(self.r):
             # Use r-s-rings
             num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.r)
+            if self.use_gpnn:
+                num_experiments *= len(self.gpnn_channels) * len(self.gpnn_layers)
             for idx in range(len(self.r)):
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_lo_features'))
@@ -1102,6 +1179,8 @@ class Experiment_Manager():
 
         elif self.is_vertex_sp_features:
             num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes)
+            if self.use_gpnn:
+                num_experiments *= len(self.gpnn_channels) * len(self.gpnn_layers)
             vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'vertex_SP_features'))
             if self.dataset_str == "ogbg-molhiv":
                 metadata_filenames.append(f"MOLHIV_vertex_SP_features_metadata.json")
@@ -1157,6 +1236,8 @@ class Experiment_Manager():
         best_min_cluster_size = 0
         best_val_perf_experiment_idx = 0
         best_max_num_clusters = 0
+        best_gpnn_layers = 0
+        best_gpnn_channels = 0
 
         best_val_perfs = []
         best_test_perfs = []
@@ -1172,193 +1253,389 @@ class Experiment_Manager():
             for pca_d in self.pca_dims:
                 for min_cluster_size in self.min_cluster_sizes:
                     for path_idx, vertex_feature_path in enumerate(vertex_feature_paths):
-                        experiment_start = time.time()
+                        if self.use_gpnn:
+                            for gpnn_l in self.gpnn_layers:
+                                for gpnn_c in self.gpnn_channels:
+                                    experiment_start = time.time()
 
-                        data["experiment_idx"][cur_experiment_idx] = {}
-                        data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
-                        data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
+                                    data["experiment_idx"][cur_experiment_idx] = {}
+                                    data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
+                                    data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
-                        vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
+                                    vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
 
-                        # Load dataset and split
-                        dataset = PygGraphPropPredDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path))
+                                    # Load dataset and split
+                                    dataset = PygGraphPropPredDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path))
 
-                        split_idx = dataset.get_idx_split()
-                        train_indices = split_idx["train"]
-                        val_indices = split_idx["valid"]
-                        test_indices = split_idx["test"]
+                                    split_idx = dataset.get_idx_split()
+                                    train_indices = split_idx["train"]
+                                    val_indices = split_idx["valid"]
+                                    test_indices = split_idx["test"]
 
-                        split_prop = { "desc" : f"fixed_{self.dataset_str}", "split_mode" : "fixed", "num_samples" : { "train" : train_indices.size()[0], "val" : val_indices.size()[0], "test" : test_indices.size()[0] }}
+                                    split_prop = { "desc" : f"fixed_{self.dataset_str}", "split_mode" : "fixed", "num_samples" : { "train" : train_indices.size()[0], "val" : val_indices.size()[0], "test" : test_indices.size()[0] }}
 
-                        evaluator = Evaluator(self.dataset_str)
+                                    evaluator = Evaluator(self.dataset_str)
 
-                        desc_str = f'{self.dataset_str}_enhanced_{self.model_str}_cluster_exp-{cur_experiment_idx}/{num_experiments}'
+                                    desc_str = f'{self.dataset_str}_enhanced_{self.model_str}_cluster_exp-{cur_experiment_idx}/{num_experiments}'
 
-                        # data_folds stores the data for a single fold
-                        data_folds = {}
-                        data_folds["avg_val_perf"] = -1.0
-                        data_folds["split_prop"] = split_prop
+                                    # data_folds stores the data for a single fold
+                                    data_folds = {}
+                                    data_folds["avg_val_perf"] = -1.0
+                                    data_folds["split_prop"] = split_prop
 
-                        # Generate clustering
-                        clusterer.reset_parameters_and_metadata()
-                        feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
-                        dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
-                        clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
+                                    # Generate clustering
+                                    clusterer.reset_parameters_and_metadata()
+                                    feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
+                                    dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
+                                    clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
 
-                        # PCA
-                        working_path = osp.join(vertex_feature_path, 'cluster-gnn')
+                                    # PCA
+                                    working_path = osp.join(vertex_feature_path, 'cluster-gnn')
 
-                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                            pca_filename = f'{pca_d}_dim_pca.pkl'
-                            clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
-                            clusterer.apply_pca_to_dataset()
+                                    if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                        pca_filename = f'{pca_d}_dim_pca.pkl'
+                                        clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
+                                        clusterer.apply_pca_to_dataset()
 
-                        # k-means
-                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                    # k-means
+                                    if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                    else:
+                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+
+                                    _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
+
+                                    clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
+                                    avg_time_cluster_overall += clustering_time
+
+                                    num_clusters = centroids.shape[0]
+
+                                    if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                                    else:
+                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+
+                                    clusterer.write_metadata(path = working_path, filename = metadata_filename)
+                                    cluster_metadata = clusterer.get_metadata()
+                                    cluster_metadata_path = osp.join(working_path, metadata_filename)
+
+                                    data_folds["cluster_metadata_path"] = cluster_metadata_path
+
+                                    # generate the gnn
+                                    self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = num_clusters)
+                                    if self.use_gpnn:
+                                        self.load_enhanced_gnn(num_gpnn_layers = gpnn_l, gpnn_channels = gpnn_c, base_gnn_str = self.base_model, num_gnn_layers = n_layers, gnn_hidden_channels = hidden_channels, lr = lr)
+                                    else:
+                                        self.load_enhanced_gnn(hidden_channels = hidden_channels, num_layers = n_layers, lr = lr)
+                                    data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
+
+                                    # enhance dataset
+                                    dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, cluster_metadata = cluster_metadata, vertex_feature_metadata = vertex_feature_metadata)
+                                    # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
+
+                                    rerun_data = {}
+
+                                    avg_rerun_time = 0.0
+                                    avg_rerun_epoch_time = 0.0
+
+                                    test_perfs = []
+                                    val_perfs = []
+
+                                    for cur_rerun in range(self.num_reruns):
+
+                                        start_rerun = time.time()
+
+                                        rerun_data[cur_rerun] = {}
+                                        rerun_data[cur_rerun]["best_val_perf"] = -1.0
+                                        rerun_data[cur_rerun]["best_val_perf_epoch_idx"] = -1
+                                        rerun_data[cur_rerun]["epoch"] = {}
+
+                                        self.gnn.model.reset_parameters()
+
+                                        # We shuffle the training data for training
+                                        train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True, num_workers = constants.num_workers)
+                                        val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
+                                        test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
+
+                                        best_rerun_val_perf = -1.0
+                                        best_rerun_test_perf = -1.0
+                                        best_rerun_val_epoch = 0
+
+                                        avg_epoch_time = 0.0
+
+                                        patience = 0
+
+                                        stop = False
+
+                                        total_num_epoch = 0
+
+                                        for epoch in range(n_epoch):
+
+                                            if stop:
+                                                break
+
+                                            t0 = time.time()
+
+                                            # rerun_data[cur_rerun]["epoch"][epoch] = {}
+
+                                            # train the gnn
+                                            self.train_ogb(gnn = self.gnn, loader = train_loader, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train')
+
+                                            # evaluate the results
+                                            train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
+                                            val_perf = self.eval_ogb(gnn = self.gnn, loader = val_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_val_eval')[dataset.eval_metric].item()
+                                            test_perf = self.eval_ogb(gnn = self.gnn, loader = test_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_test_eval')[dataset.eval_metric].item()
+
+                                            # rerun_data[cur_rerun]["epoch"][epoch]["perf"] = {'Train': train_perf, 'Validation': val_perf, 'Test': test_perf}
+
+                                            if best_rerun_val_perf < val_perf:
+                                                best_rerun_val_perf = val_perf
+                                                best_rerun_val_epoch = epoch
+                                                best_rerun_test_perf = test_perf
+                                                patience = 0
+                                            else:
+                                                patience += 1
+                                                if patience >= self.max_patience:
+                                                    stop = True
+                                                    # print(f"early stop: {total_num_epoch + 1} epochs")
+
+                                            total_num_epoch += 1
+                                            time_epoch = time.time() - t0
+                                            # rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
+                                            avg_epoch_time += time_epoch
+                                        
+                                        avg_epoch_time /= total_num_epoch
+                                        avg_rerun_epoch_time += avg_epoch_time
+
+                                        rerun_data[cur_rerun]["best_val_perf"] = best_rerun_val_perf
+                                        rerun_data[cur_rerun]["best_val_perf_epoch_idx"] = best_rerun_val_epoch
+
+                                        val_perfs.append(best_rerun_val_perf)
+                                        test_perfs.append(best_rerun_test_perf)
+                                        avg_rerun_time += time.time() - start_rerun
+
+                                    avg_rerun_time /= self.num_reruns
+                                    avg_rerun_epoch_time /= self.num_reruns
+
+                                    mean_val_perf = torch.tensor(val_perfs).mean().item()
+
+                                    # store data
+                                    data_folds["rerun"] = rerun_data
+                                    
+                                    data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = mean_val_perf
+                                    data["experiment_idx"][cur_experiment_idx].update(data_folds)
+
+                                    # These hyperparameters yield the best results so far
+                                    if best_avg_val_perf < mean_val_perf:
+                                        best_avg_val_perf = mean_val_perf
+                                        best_features_path = vertex_feature_path
+                                        best_features_metadata_filename = metadata_filenames[path_idx]
+                                        best_min_cluster_size = min_cluster_size
+                                        best_pca_dim = pca_d
+                                        best_num_clusters = n_cluster
+                                        best_clustering_metadata_path = cluster_metadata_path
+                                        best_val_perf_experiment_idx = cur_experiment_idx
+                                        best_val_perfs = val_perfs
+                                        best_test_perfs = test_perfs
+                                        best_max_num_clusters = num_clusters
+                                        best_gpnn_layers = gpnn_l
+                                        best_gpnn_channels = gpnn_c
+                                    
+                                    cur_experiment_idx += 1
+
+                                    avg_rerun_time_overall += avg_rerun_time
+                                    avg_epoch_time_overall += avg_rerun_epoch_time
+                                    avg_time_cluster_overall += clustering_time
+                                    avg_time_enhance_cluster_id_overall += add_cluster_id_time
+                                    avg_experiment_time += time.time() - experiment_start
                         else:
-                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+                            experiment_start = time.time()
 
-                        _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
+                            data["experiment_idx"][cur_experiment_idx] = {}
+                            data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
+                            data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
-                        clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
-                        avg_time_cluster_overall += clustering_time
+                            vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
 
-                        num_clusters = centroids.shape[0]
+                            # Load dataset and split
+                            dataset = PygGraphPropPredDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path))
 
-                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
-                        else:
-                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+                            split_idx = dataset.get_idx_split()
+                            train_indices = split_idx["train"]
+                            val_indices = split_idx["valid"]
+                            test_indices = split_idx["test"]
 
-                        clusterer.write_metadata(path = working_path, filename = metadata_filename)
-                        cluster_metadata = clusterer.get_metadata()
-                        cluster_metadata_path = osp.join(working_path, metadata_filename)
+                            split_prop = { "desc" : f"fixed_{self.dataset_str}", "split_mode" : "fixed", "num_samples" : { "train" : train_indices.size()[0], "val" : val_indices.size()[0], "test" : test_indices.size()[0] }}
 
-                        data_folds["cluster_metadata_path"] = cluster_metadata_path
+                            evaluator = Evaluator(self.dataset_str)
 
-                        # generate the gnn
-                        self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = num_clusters)
-                        self.load_enhanced_gnn(hidden_channels = hidden_channels, num_layers = n_layers, lr = lr)
-                        data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
+                            desc_str = f'{self.dataset_str}_enhanced_{self.model_str}_cluster_exp-{cur_experiment_idx}/{num_experiments}'
 
-                        # enhance dataset
-                        dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, cluster_metadata = cluster_metadata, vertex_feature_metadata = vertex_feature_metadata)
-                        # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
+                            # data_folds stores the data for a single fold
+                            data_folds = {}
+                            data_folds["avg_val_perf"] = -1.0
+                            data_folds["split_prop"] = split_prop
 
-                        rerun_data = {}
+                            # Generate clustering
+                            clusterer.reset_parameters_and_metadata()
+                            feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
+                            dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
+                            clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
 
-                        avg_rerun_time = 0.0
-                        avg_rerun_epoch_time = 0.0
+                            # PCA
+                            working_path = osp.join(vertex_feature_path, 'cluster-gnn')
 
-                        test_perfs = []
-                        val_perfs = []
+                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                pca_filename = f'{pca_d}_dim_pca.pkl'
+                                clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
+                                clusterer.apply_pca_to_dataset()
 
-                        for cur_rerun in range(self.num_reruns):
+                            # k-means
+                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                            else:
+                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
 
-                            start_rerun = time.time()
+                            _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
 
-                            rerun_data[cur_rerun] = {}
-                            rerun_data[cur_rerun]["best_val_perf"] = -1.0
-                            rerun_data[cur_rerun]["best_val_perf_epoch_idx"] = -1
-                            rerun_data[cur_rerun]["epoch"] = {}
+                            clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
+                            avg_time_cluster_overall += clustering_time
 
-                            self.gnn.model.reset_parameters()
+                            num_clusters = centroids.shape[0]
 
-                            # We shuffle the training data for training
-                            train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True, num_workers = constants.num_workers)
-                            val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
-                            test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
+                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                            else:
+                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
 
-                            best_rerun_val_perf = -1.0
-                            best_rerun_test_perf = -1.0
-                            best_rerun_val_epoch = 0
+                            clusterer.write_metadata(path = working_path, filename = metadata_filename)
+                            cluster_metadata = clusterer.get_metadata()
+                            cluster_metadata_path = osp.join(working_path, metadata_filename)
 
-                            avg_epoch_time = 0.0
+                            data_folds["cluster_metadata_path"] = cluster_metadata_path
 
-                            patience = 0
+                            # generate the gnn
+                            self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = num_clusters)
+                            self.load_enhanced_gnn(hidden_channels = hidden_channels, num_layers = n_layers, lr = lr)
+                            data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
 
-                            stop = False
+                            # enhance dataset
+                            dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, cluster_metadata = cluster_metadata, vertex_feature_metadata = vertex_feature_metadata)
+                            # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
 
-                            total_num_epoch = 0
+                            rerun_data = {}
 
-                            for epoch in range(n_epoch):
+                            avg_rerun_time = 0.0
+                            avg_rerun_epoch_time = 0.0
 
-                                if stop:
-                                    break
+                            test_perfs = []
+                            val_perfs = []
 
-                                t0 = time.time()
+                            for cur_rerun in range(self.num_reruns):
 
-                                # rerun_data[cur_rerun]["epoch"][epoch] = {}
+                                start_rerun = time.time()
 
-                                # train the gnn
-                                self.train_ogb(gnn = self.gnn, loader = train_loader, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train')
+                                rerun_data[cur_rerun] = {}
+                                rerun_data[cur_rerun]["best_val_perf"] = -1.0
+                                rerun_data[cur_rerun]["best_val_perf_epoch_idx"] = -1
+                                rerun_data[cur_rerun]["epoch"] = {}
 
-                                # evaluate the results
-                                train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
-                                val_perf = self.eval_ogb(gnn = self.gnn, loader = val_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_val_eval')[dataset.eval_metric].item()
-                                test_perf = self.eval_ogb(gnn = self.gnn, loader = test_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_test_eval')[dataset.eval_metric].item()
+                                self.gnn.model.reset_parameters()
 
-                                # rerun_data[cur_rerun]["epoch"][epoch]["perf"] = {'Train': train_perf, 'Validation': val_perf, 'Test': test_perf}
+                                # We shuffle the training data for training
+                                train_loader = DataLoader(dataset = dataset[train_indices], batch_size = s_batch, shuffle = True, num_workers = constants.num_workers)
+                                val_loader = DataLoader(dataset = dataset[val_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
+                                test_loader = DataLoader(dataset = dataset[test_indices], batch_size = s_batch, shuffle = False, num_workers = constants.num_workers)
 
-                                if best_rerun_val_perf < val_perf:
-                                    best_rerun_val_perf = val_perf
-                                    best_rerun_val_epoch = epoch
-                                    best_rerun_test_perf = test_perf
-                                    patience = 0
-                                else:
-                                    patience += 1
-                                    if patience >= self.max_patience:
-                                        stop = True
-                                        # print(f"early stop: {total_num_epoch + 1} epochs")
+                                best_rerun_val_perf = -1.0
+                                best_rerun_test_perf = -1.0
+                                best_rerun_val_epoch = 0
 
-                                total_num_epoch += 1
-                                time_epoch = time.time() - t0
-                                # rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
-                                avg_epoch_time += time_epoch
+                                avg_epoch_time = 0.0
+
+                                patience = 0
+
+                                stop = False
+
+                                total_num_epoch = 0
+
+                                for epoch in range(n_epoch):
+
+                                    if stop:
+                                        break
+
+                                    t0 = time.time()
+
+                                    # rerun_data[cur_rerun]["epoch"][epoch] = {}
+
+                                    # train the gnn
+                                    self.train_ogb(gnn = self.gnn, loader = train_loader, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train')
+
+                                    # evaluate the results
+                                    train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
+                                    val_perf = self.eval_ogb(gnn = self.gnn, loader = val_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_val_eval')[dataset.eval_metric].item()
+                                    test_perf = self.eval_ogb(gnn = self.gnn, loader = test_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_test_eval')[dataset.eval_metric].item()
+
+                                    # rerun_data[cur_rerun]["epoch"][epoch]["perf"] = {'Train': train_perf, 'Validation': val_perf, 'Test': test_perf}
+
+                                    if best_rerun_val_perf < val_perf:
+                                        best_rerun_val_perf = val_perf
+                                        best_rerun_val_epoch = epoch
+                                        best_rerun_test_perf = test_perf
+                                        patience = 0
+                                    else:
+                                        patience += 1
+                                        if patience >= self.max_patience:
+                                            stop = True
+                                            # print(f"early stop: {total_num_epoch + 1} epochs")
+
+                                    total_num_epoch += 1
+                                    time_epoch = time.time() - t0
+                                    # rerun_data[cur_rerun]["epoch"][epoch]["time"] = time_epoch
+                                    avg_epoch_time += time_epoch
+                                
+                                avg_epoch_time /= total_num_epoch
+                                avg_rerun_epoch_time += avg_epoch_time
+
+                                rerun_data[cur_rerun]["best_val_perf"] = best_rerun_val_perf
+                                rerun_data[cur_rerun]["best_val_perf_epoch_idx"] = best_rerun_val_epoch
+
+                                val_perfs.append(best_rerun_val_perf)
+                                test_perfs.append(best_rerun_test_perf)
+                                avg_rerun_time += time.time() - start_rerun
+
+                            avg_rerun_time /= self.num_reruns
+                            avg_rerun_epoch_time /= self.num_reruns
+
+                            mean_val_perf = torch.tensor(val_perfs).mean().item()
+
+                            # store data
+                            data_folds["rerun"] = rerun_data
                             
-                            avg_epoch_time /= total_num_epoch
-                            avg_rerun_epoch_time += avg_epoch_time
+                            data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = mean_val_perf
+                            data["experiment_idx"][cur_experiment_idx].update(data_folds)
 
-                            rerun_data[cur_rerun]["best_val_perf"] = best_rerun_val_perf
-                            rerun_data[cur_rerun]["best_val_perf_epoch_idx"] = best_rerun_val_epoch
+                            # These hyperparameters yield the best results so far
+                            if best_avg_val_perf < mean_val_perf:
+                                best_avg_val_perf = mean_val_perf
+                                best_features_path = vertex_feature_path
+                                best_features_metadata_filename = metadata_filenames[path_idx]
+                                best_min_cluster_size = min_cluster_size
+                                best_pca_dim = pca_d
+                                best_num_clusters = n_cluster
+                                best_clustering_metadata_path = cluster_metadata_path
+                                best_val_perf_experiment_idx = cur_experiment_idx
+                                best_val_perfs = val_perfs
+                                best_test_perfs = test_perfs
+                                best_max_num_clusters = num_clusters
+                            
+                            cur_experiment_idx += 1
 
-                            val_perfs.append(best_rerun_val_perf)
-                            test_perfs.append(best_rerun_test_perf)
-                            avg_rerun_time += time.time() - start_rerun
-
-                        avg_rerun_time /= self.num_reruns
-                        avg_rerun_epoch_time /= self.num_reruns
-
-                        mean_val_perf = torch.tensor(val_perfs).mean().item()
-
-                        # store data
-                        data_folds["rerun"] = rerun_data
-                        
-                        data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = mean_val_perf
-                        data["experiment_idx"][cur_experiment_idx].update(data_folds)
-
-                        # These hyperparameters yield the best results so far
-                        if best_avg_val_perf < mean_val_perf:
-                            best_avg_val_perf = mean_val_perf
-                            best_features_path = vertex_feature_path
-                            best_features_metadata_filename = metadata_filenames[path_idx]
-                            best_min_cluster_size = min_cluster_size
-                            best_pca_dim = pca_d
-                            best_num_clusters = n_cluster
-                            best_clustering_metadata_path = cluster_metadata_path
-                            best_val_perf_experiment_idx = cur_experiment_idx
-                            best_val_perfs = val_perfs
-                            best_test_perfs = test_perfs
-                            best_max_num_clusters = num_clusters
-                        
-                        cur_experiment_idx += 1
-
-                        avg_rerun_time_overall += avg_rerun_time
-                        avg_epoch_time_overall += avg_rerun_epoch_time
-                        avg_time_cluster_overall += clustering_time
-                        avg_time_enhance_cluster_id_overall += add_cluster_id_time
-                        avg_experiment_time += time.time() - experiment_start
+                            avg_rerun_time_overall += avg_rerun_time
+                            avg_epoch_time_overall += avg_rerun_epoch_time
+                            avg_time_cluster_overall += clustering_time
+                            avg_time_enhance_cluster_id_overall += add_cluster_id_time
+                            avg_experiment_time += time.time() - experiment_start
 
         # Store results
         data["res"]["best_avg_val_perf"] = best_avg_val_perf
@@ -1370,6 +1647,9 @@ class Experiment_Manager():
         data["res"]["best_pca_dim"] = best_pca_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
         data["res"]["max_num_clusters"] = best_max_num_clusters
+        if self.use_gpnn:
+            data["res"]["best_num_gpnn_layers"] = best_gpnn_layers
+            data["res"]["best_gpnn_channels"] = best_gpnn_channels
 
         avg_experiment_time /= num_experiments
         avg_rerun_time_overall /= num_experiments
@@ -1383,7 +1663,7 @@ class Experiment_Manager():
         data["times"]["rerun_avg"] = avg_rerun_time_overall
         data["times"]["epoch_avg"] = avg_epoch_time_overall
 
-        return data, best_val_perfs, best_test_perfs, best_features_path, best_features_metadata_filename, best_clustering_metadata_path, best_max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size
+        return data, best_val_perfs, best_test_perfs, best_features_path, best_features_metadata_filename, best_clustering_metadata_path, best_max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size, best_gpnn_layers, best_gpnn_channels
 
 
     # Schedules multiple experiments
@@ -1402,16 +1682,20 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
-        if self.dataset_str == 'CSL':
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+            # TU dataset
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
+        elif self.dataset_str == 'CSL':
             dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
             dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
-
-        splits = dataset.gen_data_splits()
+            splits = dataset.gen_data_splits()
 
         # Optimize GNN hyperparameters without clustering first
         print('---   Optimizing classical GNN hyperparameters   ---')
-        hyperparameter_opt_data, best_val_accs, best_test_accs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = True)
+        hyperparameter_opt_data, best_val_accs, best_test_accs, best_classic_n_layers, best_classic_n_hidden_channels, best_classic_s_batch, best_classic_n_epoch, best_classic_lr = self.run_tu_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = True)
 
         val_accs = torch.tensor(best_val_accs)
         test_accs = torch.tensor(best_test_accs)
@@ -1452,7 +1736,7 @@ class Experiment_Manager():
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
         # The max_num_clusters attribute is used since the best clustering might have less than best_num_clusters cluster (due to the min_cluster_size parameter)
-        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
+        cluster_hyperparameter_opt_data, best_val_accs, best_test_accs, best_features_path, best_feature_metadata_filename, best_clustering_paths, max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size, best_gpnn_layers, best_gpnn_channels = self.run_csl_prox_enhanced_gnn_cluster_hyperparameter_optimization(clusterer = clusterer, n_layers = best_classic_n_layers, 
                                                                                                                                                        hidden_channels = best_classic_n_hidden_channels, s_batch = best_classic_s_batch,
                                                                                                                                                        n_epoch = best_classic_n_epoch, lr = best_classic_lr, splits = splits, loss_func = loss_func, lo_idx_str = self.lo_idx_str)
 
@@ -1491,7 +1775,7 @@ class Experiment_Manager():
 
         print('---   Running hyperparameter optimization for final enhanced GNN   ---')
         # Re-train enhanced gnn hyperparameter using clustering hyperparameter
-        enhanced_hyperparameter_opt_data, best_val_accs, best_test_accs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = False, best_clustering_paths = best_clustering_paths, best_num_clusters = max_num_clusters, best_vertex_feature_metadata_path = osp.join(best_features_path, best_feature_metadata_filename))
+        enhanced_hyperparameter_opt_data, best_val_accs, best_test_accs, best_n_layers, best_n_hidden_channels, best_s_batch, best_n_epoch, best_lr = self.run_tu_csl_prox_gnn_hyperparameter_optimization(splits = splits, loss_func = loss_func, classic_gnn = False, best_clustering_paths = best_clustering_paths, best_num_clusters = max_num_clusters, best_vertex_feature_metadata_path = osp.join(best_features_path, best_feature_metadata_filename), best_gpnn_channels = best_gpnn_channels, best_num_gpnn_layers = best_gpnn_layers)
 
         data["enhanced_gnn_hyperparameter_opt"] = enhanced_hyperparameter_opt_data
 
@@ -1533,6 +1817,8 @@ class Experiment_Manager():
         data["res"]["hyperparameter"]["max_num_clusters"] = max_num_clusters
         data["res"]["hyperparameter"]["best_pca_dim"] = best_pca_dim
         data["res"]["hyperparameter"]["best_min_cluster_size"] = best_min_cluster_size
+        data["res"]["hyperparameter"]["best_num_gpnn_layers"] = best_gpnn_layers
+        data["res"]["hyperparameter"]["best_gpnn_channels"] = best_gpnn_channels
 
         print(f'---   Val acc: mean: {val_mean}; std: {val_std}   ---')
         print(f'---   Test acc: mean: {test_mean}; std: {test_std}   ---')
@@ -1543,7 +1829,7 @@ class Experiment_Manager():
 
         self.data.update(data)
 
-    def run_csl_prox_gnn_hyperparameter_optimization(self, splits: Dict, loss_func, classic_gnn: bool = True, best_clustering_paths: Optional[Dict] = None, best_num_clusters: Optional[int] = None, best_vertex_feature_metadata_path: Optional[str] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
+    def run_tu_csl_prox_gnn_hyperparameter_optimization(self, splits: Dict, loss_func, classic_gnn: bool = True, best_clustering_paths: Optional[Dict] = None, best_num_clusters: Optional[int] = None, best_vertex_feature_metadata_path: Optional[str] = None, best_num_gpnn_layers: Optional[int] = None, best_gpnn_channels: Optional[int] = None) -> Tuple[Dict, GNN_Manager, int, int, int, int, float]:
         data = {}
 
         data["num_experiments"] = (len(self.num_layers) * len(self.hidden_channels) * len(self.batch_sizes) * len(self.num_epochs) * len(self.lrs))
@@ -1553,6 +1839,8 @@ class Experiment_Manager():
             dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
         elif self.dataset_str.endswith('-Prox'):
             dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+        else:
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
 
         # The best hyperparameters
         data["res"] = {}
@@ -1624,7 +1912,11 @@ class Experiment_Manager():
                             if classic_gnn:
                                 self.load_classic_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
                             else:
-                                self.load_enhanced_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
+                                if self.use_gpnn:
+                                    self.load_enhanced_gnn(num_gpnn_layers = best_num_gpnn_layers, gpnn_channels = best_gpnn_channels, base_gnn_str = self.base_model, 
+                                                           num_gnn_layers = n_layers, gnn_hidden_channels = n_hidden_channels)
+                                else:
+                                    self.load_enhanced_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
 
                             data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
 
@@ -1653,10 +1945,11 @@ class Experiment_Manager():
                                 train_indices = split_dict["train"]
                                 val_indices = split_dict["val"]
 
-                                if self.dataset_str == 'CSL':
-                                    split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
-                                elif self.dataset_str.endswith("-Prox"):
+                                if self.dataset_str.endswith("-Prox"):
                                     split_prop = { "desc" : f"fixed_{self.h}-Prox", "split_mode" : "fixed", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+                                else:
+                                    split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+
                                 data_folds[idx]["split_prop"] = split_prop
 
                                 train_indices = torch.tensor(train_indices, dtype = torch.long)
@@ -1669,6 +1962,8 @@ class Experiment_Manager():
                                         dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
                                     elif self.dataset_str.endswith('-Prox'):
                                         dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                    else:
+                                        dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
                                     feature_metadata_path = best_vertex_feature_metadata_path
                                     dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, vertex_feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[idx])
                                     # dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[idx])
@@ -1844,45 +2139,57 @@ class Experiment_Manager():
         # decide whether k-disks, r-s-rings or vertex_sp_features are used.
         if self.k is not None and len(self.k) > 0:
             # Use k-disks
-            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.k)
+            num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.k) * len(self.min_cluster_sizes)
+            if self.use_gpnn:
+                num_experiments *= len(self.gpnn_channels) * len(self.gpnn_layers)
+
             for k in self.k:
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_lo_features'))
-                    if self.dataset_str == "CSL":
-                        metadata_filenames.append(f"CSL_{k}-disk_lo_features{lo_idx_str}_metadata.json")
-                    elif self.dataset_str.endswith("-Prox"):
+                    if self.dataset_str.endswith("-Prox"):
                         metadata_filenames.append(f"{self.h}-Prox_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+                    else:
+                        metadata_filenames.append(f"{self.dataset_str}_{k}-disk_lo_features{lo_idx_str}_metadata.json")
+
                 else:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{k}-disk_SP_features'))
-                    if self.dataset_str == "CSL":
-                        metadata_filenames.append(f"CSL_{k}-disk_SP_features_metadata.json")
-                    elif self.dataset_str.endswith("-Prox"):
+                        
+                    if self.dataset_str.endswith("-Prox"):
                         metadata_filenames.append(f"{self.h}-Prox_{k}-disk_SP_features_metadata.json")
+                    else:
+                        metadata_filenames.append(f"{self.dataset_str}_{k}-disk_SP_features_metadata.json")
 
         elif self.r is not None and self.s is not None and len(self.r) > 0 and len(self.s) == len(self.r):
             # Use r-s-rings
             num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes) * len(self.r)
+            if self.use_gpnn:
+                num_experiments *= len(self.gpnn_channels) * len(self.gpnn_layers)
+
             for idx in range(len(self.r)):
                 if self.is_lovasz_feature:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_lo_features'))
-                    if self.dataset_str == "CSL":
-                        metadata_filenames.append(f"CSL_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
-                    elif self.dataset_str.endswith("-Prox"):
+                    if self.dataset_str.endswith("-Prox"):
                         metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
+                    else:
+                        metadata_filenames.append(f"{self.dataset_str}_{self.r[idx]}-{self.s[idx]}-ring_lo_features{lo_idx_str}_metadata.json")
                 else:
                     vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'{self.r[idx]}-{self.s[idx]}-ring_SP_features'))
-                    if self.dataset_str == "CSL":
-                        metadata_filenames.append(f"CSL_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
-                    elif self.dataset_str.endswith("-Prox"):
+                    if self.dataset_str.endswith("-Prox"):
                         metadata_filenames.append(f"{self.h}-Prox_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
+                    else:
+                        metadata_filenames.append(f"{self.dataset_str}_{self.r[idx]}-{self.s[idx]}-ring_SP_features_metadata.json")
+
 
         elif self.is_vertex_sp_features:
             num_experiments = len(self.num_clusters) * len(self.pca_dims) * len(self.min_cluster_sizes)
+            if self.use_gpnn:
+                num_experiments *= len(self.gpnn_channels) * len(self.gpnn_layers)
+            
             vertex_feature_paths.append(osp.join(self.dataset_path, 'results', f'vertex_SP_features'))
-            if self.dataset_str == "CSL":
-                metadata_filenames.append(f"CSL_vertex_SP_features_metadata.json")
-            elif self.dataset_str.endswith("-Prox"):
+            if self.dataset_str.endswith("-Prox"):
                 metadata_filenames.append(f"{self.h}-Prox_vertex_SP_features_metadata.json")
+            else:
+                metadata_filenames.append(f"{self.dataset_str}_vertex_SP_features_metadata.json")
 
         else:
             raise ValueError("Invalid vertex feature identifiers")
@@ -1930,6 +2237,8 @@ class Experiment_Manager():
         best_min_cluster_size = 0
         best_val_acc_experiment_idx = 0
         best_max_num_clusters = 0
+        best_gpnn_layers = 0
+        best_gpnn_channels = 0
 
         best_val_accs = []
         best_test_accs = []
@@ -1948,170 +2257,349 @@ class Experiment_Manager():
             for pca_d in self.pca_dims:
                 for min_cluster_size in self.min_cluster_sizes:
                     for path_idx, vertex_feature_path in enumerate(vertex_feature_paths):
-                        # Run the optimization, the different feature datasets are defined by the vertex_feature_path
-                        experiment_start = time.time()
+                        if self.use_gpnn:
+                            for gpnn_l in self.gpnn_layers:
+                                for gpnn_c in self.gpnn_channels:
 
-                        if self.dataset_str == 'CSL':
-                            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
-                        elif self.dataset_str.endswith('-Prox'):
-                            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                    # Run the optimization, the different feature datasets are defined by the vertex_feature_path
+                                    experiment_start = time.time()
 
-                        vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
-                        # set up clusterer
-                        feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
-                        dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
+                                    if self.dataset_str == 'CSL':
+                                        dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                    elif self.dataset_str.endswith('-Prox'):
+                                        dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                    else:
+                                        dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
 
-                        clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, normalize = self.normalize_features)
+                                    vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
+                                    # set up clusterer
+                                    feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
+                                    dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
 
-                        data["experiment_idx"][cur_experiment_idx] = {}
-                        data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
-                        data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
+                                    clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, normalize = self.normalize_features)
 
-                        data["experiment_idx"][cur_experiment_idx]["model"] = {}
-                        data["experiment_idx"][cur_experiment_idx]["splits"] = {}
+                                    data["experiment_idx"][cur_experiment_idx] = {}
+                                    data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
+                                    data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
-                        # k-fold CV
-                        # data_folds stores the data for a single fold
-                        data_folds = {}
-                        
-                        avg_val_acc = 0.0
-                        avg_time_cluster = 0.0
-                        avg_time_enhance_cluster_id = 0.0
-                        avg_time_fold = 0.0
-                        avg_time_rerun = 0.0
-                        avg_time_epoch = 0.0
-                        fold_clustering_metadata_paths = {}
-                        max_num_clusters = 0
+                                    data["experiment_idx"][cur_experiment_idx]["model"] = {}
+                                    data["experiment_idx"][cur_experiment_idx]["splits"] = {}
 
-                        test_accs = []
-                        val_accs = []
+                                    # k-fold CV
+                                    # data_folds stores the data for a single fold
+                                    data_folds = {}
+                                    
+                                    avg_val_acc = 0.0
+                                    avg_time_cluster = 0.0
+                                    avg_time_enhance_cluster_id = 0.0
+                                    avg_time_fold = 0.0
+                                    avg_time_rerun = 0.0
+                                    avg_time_epoch = 0.0
+                                    fold_clustering_metadata_paths = {}
+                                    max_num_clusters = 0
 
-                        # Initialize the gnn and dataset parameters
-                        self.gnn.set_dataset_parameters(num_features = dataset.num_features, num_classes = dataset.num_classes, num_clusters = n_cluster)
-                        self.load_enhanced_gnn(hidden_channels = hidden_channels, num_layers = n_layers, lr = lr)
-                        data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
+                                    test_accs = []
+                                    val_accs = []
 
-                        for idx, split_dict in splits.items():
-                            fold_start = time.time()
-                            # Cluster the data based on the hyperparameters
+                                    # Initialize the gnn and dataset parameters
+                                    self.gnn.set_dataset_parameters(num_features = dataset.num_features, num_classes = dataset.num_classes, num_clusters = n_cluster)
+                                    self.load_enhanced_gnn(gpnn_channels = gpnn_c, num_gpnn_layers = gpnn_l, gnn_hidden_channels= hidden_channels, num_gnn_layers = n_layers, lr = lr)
+                                    data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
 
-                            data_folds[idx] = {}
-                            data_folds[idx]["avg_val_acc_split"] = -1.0
+                                    for idx, split_dict in splits.items():
+                                        fold_start = time.time()
+                                        # Cluster the data based on the hyperparameters
 
-                            test_indices = split_dict["test"]
-                            train_indices = split_dict["train"]
-                            val_indices = split_dict["val"]
+                                        data_folds[idx] = {}
+                                        data_folds[idx]["avg_val_acc_split"] = -1.0
 
-                            if self.dataset_str == 'CSL':
-                                split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
-                            elif self.dataset_str.endswith('-Prox'):
-                                split_prop = { "desc" : f"fixed_{self.h}-Prox", "split_mode" : "fixed", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+                                        test_indices = split_dict["test"]
+                                        train_indices = split_dict["train"]
+                                        val_indices = split_dict["val"]
 
-                            data_folds[idx]["split_prop"] = split_prop
+                                        if self.dataset_str == 'CSL':
+                                            split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+                                        elif self.dataset_str.endswith('-Prox'):
+                                            split_prop = { "desc" : f"fixed_{self.h}-Prox", "split_mode" : "fixed", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
 
-                            train_indices = torch.tensor(train_indices, dtype = torch.long)
-                            val_indices = torch.tensor(val_indices, dtype = torch.long)
+                                        data_folds[idx]["split_prop"] = split_prop
 
-                            # Load the current dataset into the clusterer
-                            clusterer.reset_parameters_and_metadata()
-                            clusterer.set_split(split = train_indices, split_prop = split_prop)
-                            # clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
+                                        train_indices = torch.tensor(train_indices, dtype = torch.long)
+                                        val_indices = torch.tensor(val_indices, dtype = torch.long)
 
-                            # PCA
-                            working_path = osp.join(vertex_feature_path, 'cluster-gnn', f'{idx}-split')
+                                        # Load the current dataset into the clusterer
+                                        clusterer.reset_parameters_and_metadata()
+                                        clusterer.set_split(split = train_indices, split_prop = split_prop)
+                                        # clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
 
-                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                pca_filename = f'{pca_d}_dim_pca.pkl'
-                                clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
-                                clusterer.apply_pca_to_dataset()
+                                        # PCA
+                                        working_path = osp.join(vertex_feature_path, 'cluster-gnn', f'{idx}-split')
 
-                            # k-means
-                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
-                            else:
-                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+                                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                            pca_filename = f'{pca_d}_dim_pca.pkl'
+                                            clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
+                                            clusterer.apply_pca_to_dataset()
 
-                            _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
+                                        # k-means
+                                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                        else:
+                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
 
-                            clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
-                            avg_time_cluster += clustering_time
+                                        _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
 
-                            num_clusters = centroids.shape[0]
-                            if num_clusters > max_num_clusters:
-                                max_num_clusters = num_clusters
+                                        clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
+                                        avg_time_cluster += clustering_time
 
-                            if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
-                            else:
-                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+                                        num_clusters = centroids.shape[0]
+                                        if num_clusters > max_num_clusters:
+                                            max_num_clusters = num_clusters
 
-                            clusterer.write_metadata(path = working_path, filename = metadata_filename)
-                            cluster_metadata = clusterer.get_metadata()
-                            cluster_metadata_path = osp.join(working_path, metadata_filename)
+                                        if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                                        else:
+                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
 
-                            fold_clustering_metadata_paths[idx] = cluster_metadata_path
+                                        clusterer.write_metadata(path = working_path, filename = metadata_filename)
+                                        cluster_metadata = clusterer.get_metadata()
+                                        cluster_metadata_path = osp.join(working_path, metadata_filename)
 
-                            data_folds[idx]["cluster_metadata_path"] = cluster_metadata_path
+                                        fold_clustering_metadata_paths[idx] = cluster_metadata_path
 
-                            # Create a new dataset enhanced with cluster_ids for GNN training
+                                        data_folds[idx]["cluster_metadata_path"] = cluster_metadata_path
+
+                                        # Create a new dataset enhanced with cluster_ids for GNN training
+                                        if self.dataset_str == 'CSL':
+                                            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                        elif self.dataset_str.endswith('-Prox'):
+                                            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                        else:
+                                            dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
+                                        dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_dataset = clusterer.original_dataset, cluster_metadata = cluster_metadata)
+                                        # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
+                                        avg_time_enhance_cluster_id += add_cluster_id_time
+
+                                        # Evaluate a single experiment given the parameters
+                                        avg_val_acc_fold, val_accs_fold, rerun_data, avg_test_acc_fold, test_accs_fold, avg_time_rerun_fold, avg_time_epoch_fold = self.run_csl_prox_gnn_hyperparameter_experiment_split(dataset = dataset, s_batch = s_batch, n_epoch = n_epoch, train_indices = train_indices, val_indices = val_indices, test_indices = test_indices, loss_func = loss_func)
+
+                                        # store data
+                                        data_folds[idx]["avg_val_acc_split"] = avg_val_acc_fold
+                                        data_folds[idx]["rerun"] = rerun_data
+
+                                        val_accs.extend(val_accs_fold)
+                                        test_accs.extend(test_accs_fold)
+
+                                        avg_val_acc += avg_val_acc_fold
+                                        avg_time_rerun += avg_time_rerun_fold
+                                        avg_time_epoch += avg_time_epoch_fold
+
+                                        avg_time_fold += time.time() - fold_start
+                                        
+                                    avg_time_fold /= len(splits)
+                                    avg_val_acc /= len(splits)
+                                    avg_time_rerun /= len(splits)
+                                    avg_time_epoch /= len(splits)
+                                    avg_time_cluster /= len(splits)
+                                    avg_time_enhance_cluster_id /= len(splits)
+
+                                    data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = avg_val_acc
+
+                                    data["experiment_idx"][cur_experiment_idx]["splits"] = data_folds
+
+                                    # These hyperparameters yield the best results so far
+                                    if avg_val_acc > best_avg_val_acc:
+                                        best_avg_val_acc = avg_val_acc
+                                        best_min_cluster_size = min_cluster_size
+                                        best_pca_dim = pca_d
+                                        best_num_clusters = n_cluster
+                                        best_features_path = vertex_feature_path
+                                        best_features_metadata_filename = metadata_filenames[path_idx]
+                                        best_val_acc_experiment_idx = cur_experiment_idx
+                                        best_clustering_metadata_paths = fold_clustering_metadata_paths
+                                        best_max_num_clusters = max_num_clusters
+                                        best_val_accs = val_accs
+                                        best_test_accs = test_accs
+                                        best_gpnn_channels = gpnn_c
+                                        best_gpnn_layers = gpnn_l
+                                        
+                                    cur_experiment_idx += 1
+
+                                    avg_fold_time_overall += avg_time_fold
+                                    avg_rerun_time_overall += avg_time_rerun
+                                    avg_epoch_time_overall += avg_time_epoch
+                                    avg_time_cluster_overall += avg_time_cluster
+                                    avg_time_enhance_cluster_id_overall += avg_time_enhance_cluster_id
+
+                                    avg_experiment_time += time.time() - experiment_start
+                        else:
+                            # Run the optimization, the different feature datasets are defined by the vertex_feature_path
+                            experiment_start = time.time()
+
                             if self.dataset_str == 'CSL':
                                 dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
                             elif self.dataset_str.endswith('-Prox'):
                                 dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
-                            dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_dataset = clusterer.original_dataset, cluster_metadata = cluster_metadata)
-                            # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
-                            avg_time_enhance_cluster_id += add_cluster_id_time
+                            else:
+                                dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
 
-                            # Evaluate a single experiment given the parameters
-                            avg_val_acc_fold, val_accs_fold, rerun_data, avg_test_acc_fold, test_accs_fold, avg_time_rerun_fold, avg_time_epoch_fold = self.run_csl_prox_gnn_hyperparameter_experiment_split(dataset = dataset, s_batch = s_batch, n_epoch = n_epoch, train_indices = train_indices, val_indices = val_indices, test_indices = test_indices, loss_func = loss_func)
+                            vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
+                            # set up clusterer
+                            feature_vector_database_path = vertex_feature_metadata["result_prop"]["path"]
+                            dataset_desc = vertex_feature_metadata["dataset_prop"]["desc"]
 
-                            # store data
-                            data_folds[idx]["avg_val_acc_split"] = avg_val_acc_fold
-                            data_folds[idx]["rerun"] = rerun_data
+                            clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, normalize = self.normalize_features)
 
-                            val_accs.extend(val_accs_fold)
-                            test_accs.extend(test_accs_fold)
+                            data["experiment_idx"][cur_experiment_idx] = {}
+                            data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
+                            data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
-                            avg_val_acc += avg_val_acc_fold
-                            avg_time_rerun += avg_time_rerun_fold
-                            avg_time_epoch += avg_time_epoch_fold
+                            data["experiment_idx"][cur_experiment_idx]["model"] = {}
+                            data["experiment_idx"][cur_experiment_idx]["splits"] = {}
 
-                            avg_time_fold += time.time() - fold_start
+                            # k-fold CV
+                            # data_folds stores the data for a single fold
+                            data_folds = {}
                             
-                        avg_time_fold /= len(splits)
-                        avg_val_acc /= len(splits)
-                        avg_time_rerun /= len(splits)
-                        avg_time_epoch /= len(splits)
-                        avg_time_cluster /= len(splits)
-                        avg_time_enhance_cluster_id /= len(splits)
+                            avg_val_acc = 0.0
+                            avg_time_cluster = 0.0
+                            avg_time_enhance_cluster_id = 0.0
+                            avg_time_fold = 0.0
+                            avg_time_rerun = 0.0
+                            avg_time_epoch = 0.0
+                            fold_clustering_metadata_paths = {}
+                            max_num_clusters = 0
 
-                        data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = avg_val_acc
+                            test_accs = []
+                            val_accs = []
 
-                        data["experiment_idx"][cur_experiment_idx]["splits"] = data_folds
+                            # Initialize the gnn and dataset parameters
+                            self.gnn.set_dataset_parameters(num_features = dataset.num_features, num_classes = dataset.num_classes, num_clusters = n_cluster)
+                            self.load_enhanced_gnn(hidden_channels = hidden_channels, num_layers = n_layers, lr = lr)
+                            data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
 
-                        # These hyperparameters yield the best results so far
-                        if avg_val_acc > best_avg_val_acc:
-                            best_avg_val_acc = avg_val_acc
-                            best_min_cluster_size = min_cluster_size
-                            best_pca_dim = pca_d
-                            best_num_clusters = n_cluster
-                            best_features_path = vertex_feature_path
-                            best_features_metadata_filename = metadata_filenames[path_idx]
-                            best_val_acc_experiment_idx = cur_experiment_idx
-                            best_clustering_metadata_paths = fold_clustering_metadata_paths
-                            best_max_num_clusters = max_num_clusters
-                            best_val_accs = val_accs
-                            best_test_accs = test_accs
-                            
-                        cur_experiment_idx += 1
+                            for idx, split_dict in splits.items():
+                                fold_start = time.time()
+                                # Cluster the data based on the hyperparameters
 
-                        avg_fold_time_overall += avg_time_fold
-                        avg_rerun_time_overall += avg_time_rerun
-                        avg_epoch_time_overall += avg_time_epoch
-                        avg_time_cluster_overall += avg_time_cluster
-                        avg_time_enhance_cluster_id_overall += avg_time_enhance_cluster_id
+                                data_folds[idx] = {}
+                                data_folds[idx]["avg_val_acc_split"] = -1.0
 
-                        avg_experiment_time += time.time() - experiment_start
+                                test_indices = split_dict["test"]
+                                train_indices = split_dict["train"]
+                                val_indices = split_dict["val"]
+
+                                if self.dataset_str == 'CSL':
+                                    split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+                                elif self.dataset_str.endswith('-Prox'):
+                                    split_prop = { "desc" : f"fixed_{self.h}-Prox", "split_mode" : "fixed", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+
+                                data_folds[idx]["split_prop"] = split_prop
+
+                                train_indices = torch.tensor(train_indices, dtype = torch.long)
+                                val_indices = torch.tensor(val_indices, dtype = torch.long)
+
+                                # Load the current dataset into the clusterer
+                                clusterer.reset_parameters_and_metadata()
+                                clusterer.set_split(split = train_indices, split_prop = split_prop)
+                                # clusterer.load_dataset_from_svmlight(path = feature_vector_database_path, dtype = 'float64', dataset_desc = dataset_desc, split = train_indices, split_prop = split_prop, normalize = self.normalize_features)
+
+                                # PCA
+                                working_path = osp.join(vertex_feature_path, 'cluster-gnn', f'{idx}-split')
+
+                                if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                    pca_filename = f'{pca_d}_dim_pca.pkl'
+                                    clusterer.generate_pca(target_dimensions = pca_d, write_pca_path = working_path, write_pca_filename = pca_filename)
+                                    clusterer.apply_pca_to_dataset()
+
+                                # k-means
+                                if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                else:
+                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+
+                                _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
+
+                                clusterer.write_centroids_or_medoids(points = centroids, path = working_path, filename = centroids_filename)
+                                avg_time_cluster += clustering_time
+
+                                num_clusters = centroids.shape[0]
+                                if num_clusters > max_num_clusters:
+                                    max_num_clusters = num_clusters
+
+                                if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
+                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                                else:
+                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+
+                                clusterer.write_metadata(path = working_path, filename = metadata_filename)
+                                cluster_metadata = clusterer.get_metadata()
+                                cluster_metadata_path = osp.join(working_path, metadata_filename)
+
+                                fold_clustering_metadata_paths[idx] = cluster_metadata_path
+
+                                data_folds[idx]["cluster_metadata_path"] = cluster_metadata_path
+
+                                # Create a new dataset enhanced with cluster_ids for GNN training
+                                if self.dataset_str == 'CSL':
+                                    dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                elif self.dataset_str.endswith('-Prox'):
+                                    dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                else:
+                                    dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
+                                dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_dataset = clusterer.original_dataset, cluster_metadata = cluster_metadata)
+                                # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
+                                avg_time_enhance_cluster_id += add_cluster_id_time
+
+                                # Evaluate a single experiment given the parameters
+                                avg_val_acc_fold, val_accs_fold, rerun_data, avg_test_acc_fold, test_accs_fold, avg_time_rerun_fold, avg_time_epoch_fold = self.run_csl_prox_gnn_hyperparameter_experiment_split(dataset = dataset, s_batch = s_batch, n_epoch = n_epoch, train_indices = train_indices, val_indices = val_indices, test_indices = test_indices, loss_func = loss_func)
+
+                                # store data
+                                data_folds[idx]["avg_val_acc_split"] = avg_val_acc_fold
+                                data_folds[idx]["rerun"] = rerun_data
+
+                                val_accs.extend(val_accs_fold)
+                                test_accs.extend(test_accs_fold)
+
+                                avg_val_acc += avg_val_acc_fold
+                                avg_time_rerun += avg_time_rerun_fold
+                                avg_time_epoch += avg_time_epoch_fold
+
+                                avg_time_fold += time.time() - fold_start
+                                
+                            avg_time_fold /= len(splits)
+                            avg_val_acc /= len(splits)
+                            avg_time_rerun /= len(splits)
+                            avg_time_epoch /= len(splits)
+                            avg_time_cluster /= len(splits)
+                            avg_time_enhance_cluster_id /= len(splits)
+
+                            data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = avg_val_acc
+
+                            data["experiment_idx"][cur_experiment_idx]["splits"] = data_folds
+
+                            # These hyperparameters yield the best results so far
+                            if avg_val_acc > best_avg_val_acc:
+                                best_avg_val_acc = avg_val_acc
+                                best_min_cluster_size = min_cluster_size
+                                best_pca_dim = pca_d
+                                best_num_clusters = n_cluster
+                                best_features_path = vertex_feature_path
+                                best_features_metadata_filename = metadata_filenames[path_idx]
+                                best_val_acc_experiment_idx = cur_experiment_idx
+                                best_clustering_metadata_paths = fold_clustering_metadata_paths
+                                best_max_num_clusters = max_num_clusters
+                                best_val_accs = val_accs
+                                best_test_accs = test_accs
+                                
+                            cur_experiment_idx += 1
+
+                            avg_fold_time_overall += avg_time_fold
+                            avg_rerun_time_overall += avg_time_rerun
+                            avg_epoch_time_overall += avg_time_epoch
+                            avg_time_cluster_overall += avg_time_cluster
+                            avg_time_enhance_cluster_id_overall += avg_time_enhance_cluster_id
+
+                            avg_experiment_time += time.time() - experiment_start
 
         # Store results
         data["res"]["best_avg_val_acc"] = best_avg_val_acc
@@ -2123,6 +2611,9 @@ class Experiment_Manager():
         data["res"]["best_pca_dim"] = best_pca_dim
         data["res"]["best_min_cluster_size"] = best_min_cluster_size
         data["res"]["max_num_clusters"] = best_max_num_clusters
+        if self.use_gpnn:
+            data["res"]["best_num_gpnn_layers"] = best_gpnn_layers
+            data["res"]["best_gpnn_channels"] = best_gpnn_channels
 
         avg_experiment_time /= num_experiments
         avg_fold_time_overall /= num_experiments
@@ -2138,7 +2629,7 @@ class Experiment_Manager():
         data["times"]["rerun_avg"] = avg_rerun_time_overall
         data["times"]["epoch_avg"] = avg_epoch_time_overall
 
-        return data, best_val_accs, best_test_accs, best_features_path, best_features_metadata_filename, best_clustering_metadata_paths, best_max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size
+        return data, best_val_accs, best_test_accs, best_features_path, best_features_metadata_filename, best_clustering_metadata_paths, best_max_num_clusters, best_num_clusters, best_pca_dim, best_min_cluster_size, best_gpnn_layers, best_gpnn_channels
 
     def get_data(self) -> Dict:
         return deepcopy(self.data)

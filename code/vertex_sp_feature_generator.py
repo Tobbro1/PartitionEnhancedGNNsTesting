@@ -11,6 +11,7 @@ from torch_geometric.data import Dataset, Data
 #import own functionality
 from feature_generator import Feature_Generator, TimeLoggingEvent
 import SP_features as spf
+import util
 
 # NOTE: This feature should only be computed for sufficiently small graphs since it computes the distance matrix of the whole graph with the floyd warshall algorithm (O(n^3))
 class Vertex_SP_Feature_Generator(Feature_Generator):
@@ -77,11 +78,13 @@ class Vertex_SP_Feature_Generator(Feature_Generator):
         # run floyd warshall to compute a distances matrix for the graph
         floyd_warshall_distances = self.sp_features.floyd_warshall(graph = cur_graph)
 
+        x = util.one_hot_to_labels(cur_graph.x)
+
         # for each vertex of the given graph we compute the feature vector
         for vertex_id in range(num_vertices):
             vertex_identifier = tuple([graph_id, vertex_id])
 
-            vertex_sp_map = self.sp_features.vertex_sp_feature_map(distances = floyd_warshall_distances, x = cur_graph.x, vertex_id = vertex_id)
+            vertex_sp_map = self.sp_features.vertex_sp_feature_map(distances = floyd_warshall_distances, x = x, vertex_id = vertex_id)
             result_v, editmask_v = self.sp_features.vertex_sp_feature_vector_from_map(dict = vertex_sp_map, vertex_identifier = vertex_identifier)
 
             editmask_res = np.logical_or(editmask_res, editmask_v)
@@ -130,13 +133,15 @@ class Vertex_SP_Feature_Generator(Feature_Generator):
         for v in range(num_vertices):
             self.log_time(event = TimeLoggingEvent.floyd_warshall, value = floyd_warshall_time, vertex_identifier = tuple([graph_id, v]))
 
+        x = util.one_hot_to_labels(cur_graph.x)
+
         # for each vertex of the given graph we compute the feature vector
         for vertex_id in range(num_vertices):
             sp_map_start = time.time()
 
             vertex_identifier = tuple([graph_id, vertex_id])
 
-            vertex_sp_map = self.sp_features.vertex_sp_feature_map(distances = floyd_warshall_distances, x = cur_graph.x, vertex_id = vertex_id)
+            vertex_sp_map = self.sp_features.vertex_sp_feature_map(distances = floyd_warshall_distances, x = x, vertex_id = vertex_id)
             result_v, editmask_v = self.sp_features.vertex_sp_feature_vector_from_map(dict = vertex_sp_map, vertex_identifier = vertex_identifier)
 
             editmask_res = np.logical_or(editmask_res, editmask_v)
@@ -167,11 +172,13 @@ def compute_vertex_sp_feature_vectors(graph: Data, sp_features: spf.SP_vertex_fe
     # run floyd warshall to compute a distances matrix for the graph
     floyd_warshall_distances = sp_features.floyd_warshall(graph = graph)
 
+    x = util.one_hot_to_labels(graph.x)
+
     # for each vertex of the given graph we compute the feature vector
     for vertex_id in range(num_vertices):
         vertex_identifier = tuple([graph_id, vertex_id])
 
-        vertex_sp_map = sp_features.vertex_sp_feature_map(distances = floyd_warshall_distances, x = graph.x, vertex_id = vertex_id)
+        vertex_sp_map = sp_features.vertex_sp_feature_map(distances = floyd_warshall_distances, x = x, vertex_id = vertex_id)
         result_v, _ = sp_features.vertex_sp_feature_vector_from_map(dict = vertex_sp_map, vertex_identifier = vertex_identifier)
 
         result.append(result_v[2:])
