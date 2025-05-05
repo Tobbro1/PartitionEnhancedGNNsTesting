@@ -951,6 +951,10 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
 
+                            data["experiment_idx"][cur_experiment_idx]["config"] = {}
+                            data["experiment_idx"][cur_experiment_idx]["config"]["batch_size"] = s_batch
+                            data["experiment_idx"][cur_experiment_idx]["config"]["num_epochs"] = n_epoch
+
                             # Load dataset and split
                             dataset = PygGraphPropPredDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path))
 
@@ -1262,6 +1266,13 @@ class Experiment_Manager():
                                     data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
                                     data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
+                                    data["experiment_idx"][cur_experiment_idx]["config"] = {}
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["num_cluster"] = n_cluster
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = True
+
                                     vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
 
                                     # Load dataset and split
@@ -1454,6 +1465,13 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
                             data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
+
+                            data["experiment_idx"][cur_experiment_idx]["config"] = {}
+                            data["experiment_idx"][cur_experiment_idx]["config"]["num_cluster"] = n_cluster
+                            data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
+                            data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
+                            data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                            data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = False
 
                             vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
 
@@ -1895,10 +1913,11 @@ class Experiment_Manager():
                         for lr in self.lrs:
                             experiment_start = time.time()
 
-
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
-
+                            data["experiment_idx"][cur_experiment_idx]["config"] = {}
+                            data["experiment_idx"][cur_experiment_idx]["config"]["batch_size"] = s_batch
+                            data["experiment_idx"][cur_experiment_idx]["config"]["num_epochs"] = n_epoch
                             # stored data:
                             # avg val acc
                             # foreach fold: avg val acc, split props, rerun data
@@ -2282,6 +2301,13 @@ class Experiment_Manager():
                                     data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
                                     data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
+                                    data["experiment_idx"][cur_experiment_idx]["config"] = {}
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["num_cluster"] = n_cluster
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = True
+
                                     data["experiment_idx"][cur_experiment_idx]["model"] = {}
                                     data["experiment_idx"][cur_experiment_idx]["splits"] = {}
 
@@ -2452,6 +2478,13 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
                             data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
+
+                            data["experiment_idx"][cur_experiment_idx]["config"] = {}
+                            data["experiment_idx"][cur_experiment_idx]["config"]["num_cluster"] = n_cluster
+                            data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
+                            data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
+                            data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                            data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = False
 
                             data["experiment_idx"][cur_experiment_idx]["model"] = {}
                             data["experiment_idx"][cur_experiment_idx]["splits"] = {}
