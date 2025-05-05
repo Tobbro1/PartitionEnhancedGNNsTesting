@@ -53,11 +53,13 @@ class Partition_enhanced_GIN_conv(GINConv):
         # propagate_type: (x: OptPairTensor)
         out = self.propagate(edge_index, x=x, size=size)
 
-        x_r = x[1][mask,:]
+        x_r = x[1]
         if x_r is not None:
-            out[mask,:] = out[mask,:] + (1 + self.eps) * x_r
+            out = out + (1 + self.eps) * x_r
 
-        return self.nn(out[mask,:])
+        out = self.nn(out)
+
+        return out[mask,:]
 
 class Partition_enhanced_GIN(torch.nn.Module):
 
