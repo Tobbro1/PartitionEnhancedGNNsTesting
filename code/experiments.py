@@ -951,6 +951,8 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
 
+                            data["experiment_idx"][cur_experiment_idx]["res"] = {}
+
                             data["experiment_idx"][cur_experiment_idx]["config"] = {}
                             data["experiment_idx"][cur_experiment_idx]["config"]["batch_size"] = s_batch
                             data["experiment_idx"][cur_experiment_idx]["config"]["num_epochs"] = n_epoch
@@ -1078,6 +1080,22 @@ class Experiment_Manager():
                             data_folds["rerun"] = rerun_data
                             
                             data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = mean_val_perf
+
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"] = {}
+                            val_accs_tensor = torch.tensor(val_perfs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"]["mean"] = val_accs_tensor.mean().item()
+                            if len(val_perfs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = val_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = 0.0
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"] = {}
+                            test_accs_tensor = torch.tensor(test_perfs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"]["mean"] = test_accs_tensor.mean().item()
+                            if len(test_perfs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = test_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = 0.0
+
                             data["experiment_idx"][cur_experiment_idx].update(data_folds)
 
                             # These hyperparameters yield the best results so far
@@ -1264,6 +1282,9 @@ class Experiment_Manager():
 
                                     data["experiment_idx"][cur_experiment_idx] = {}
                                     data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
+
+                                    data["experiment_idx"][cur_experiment_idx]["res"] = {}
+
                                     data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
                                     data["experiment_idx"][cur_experiment_idx]["config"] = {}
@@ -1434,6 +1455,22 @@ class Experiment_Manager():
                                     data_folds["rerun"] = rerun_data
                                     
                                     data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = mean_val_perf
+
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["val"] = {}
+                                    val_accs_tensor = torch.tensor(val_perfs, dtype = torch.float64)
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["val"]["mean"] = val_accs_tensor.mean().item()
+                                    if len(val_perfs) > 1:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = val_accs_tensor.std().item()
+                                    else:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = 0.0
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["test"] = {}
+                                    test_accs_tensor = torch.tensor(test_perfs, dtype = torch.float64)
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["test"]["mean"] = test_accs_tensor.mean().item()
+                                    if len(test_perfs) > 1:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = test_accs_tensor.std().item()
+                                    else:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = 0.0
+
                                     data["experiment_idx"][cur_experiment_idx].update(data_folds)
 
                                     # These hyperparameters yield the best results so far
@@ -1464,6 +1501,9 @@ class Experiment_Manager():
 
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = -1.0
+
+                            data["experiment_idx"][cur_experiment_idx]["res"] = {}
+
                             data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
                             data["experiment_idx"][cur_experiment_idx]["config"] = {}
@@ -1492,6 +1532,7 @@ class Experiment_Manager():
                             # data_folds stores the data for a single fold
                             data_folds = {}
                             data_folds["avg_val_perf"] = -1.0
+
                             data_folds["split_prop"] = split_prop
 
                             # Generate clustering
@@ -1631,6 +1672,22 @@ class Experiment_Manager():
                             data_folds["rerun"] = rerun_data
                             
                             data["experiment_idx"][cur_experiment_idx]["avg_val_perf"] = mean_val_perf
+
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"] = {}
+                            val_accs_tensor = torch.tensor(val_perfs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"]["mean"] = val_accs_tensor.mean().item()
+                            if len(val_perfs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = val_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = 0.0
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"] = {}
+                            test_accs_tensor = torch.tensor(test_perfs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"]["mean"] = test_accs_tensor.mean().item()
+                            if len(test_perfs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = test_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = 0.0
+
                             data["experiment_idx"][cur_experiment_idx].update(data_folds)
 
                             # These hyperparameters yield the best results so far
@@ -1938,7 +1995,7 @@ class Experiment_Manager():
                                     self.load_enhanced_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
 
                             data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
-
+                            data["experiment_idx"][cur_experiment_idx]["res"] = {}
                             data["experiment_idx"][cur_experiment_idx]["splits"] = {}
 
                             # k-fold CV
@@ -2009,7 +2066,20 @@ class Experiment_Manager():
                             avg_time_epoch /= len(splits)
 
                             data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = avg_val_acc_overall
-
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"] = {}
+                            val_accs_tensor = torch.tensor(val_accs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"]["mean"] = val_accs_tensor.mean().item()
+                            if len(val_accs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = val_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = 0.0
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"] = {}
+                            test_accs_tensor = torch.tensor(test_accs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"]["mean"] = test_accs_tensor.mean().item()
+                            if len(test_accs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = test_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = 0.0
                             data["experiment_idx"][cur_experiment_idx]["splits"] = data_folds
 
                             # These hyperparameters yield the best results so far
@@ -2299,6 +2369,9 @@ class Experiment_Manager():
 
                                     data["experiment_idx"][cur_experiment_idx] = {}
                                     data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
+
+                                    data["experiment_idx"][cur_experiment_idx]["res"] = {}
+
                                     data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
                                     data["experiment_idx"][cur_experiment_idx]["config"] = {}
@@ -2429,7 +2502,20 @@ class Experiment_Manager():
                                     avg_time_enhance_cluster_id /= len(splits)
 
                                     data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = avg_val_acc
-
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["val"] = {}
+                                    val_accs_tensor = torch.tensor(val_accs, dtype = torch.float64)
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["val"]["mean"] = val_accs_tensor.mean().item()
+                                    if len(val_accs) > 1:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = val_accs_tensor.std().item()
+                                    else:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = 0.0
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["test"] = {}
+                                    test_accs_tensor = torch.tensor(test_accs, dtype = torch.float64)
+                                    data["experiment_idx"][cur_experiment_idx]["res"]["test"]["mean"] = test_accs_tensor.mean().item()
+                                    if len(test_accs) > 1:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = test_accs_tensor.std().item()
+                                    else:
+                                        data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = 0.0
                                     data["experiment_idx"][cur_experiment_idx]["splits"] = data_folds
 
                                     # These hyperparameters yield the best results so far
@@ -2477,6 +2563,9 @@ class Experiment_Manager():
 
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
+
+                            data["experiment_idx"][cur_experiment_idx]["res"] = {}
+
                             data["experiment_idx"][cur_experiment_idx]["vertex_feature_path"] = vertex_feature_path
 
                             data["experiment_idx"][cur_experiment_idx]["config"] = {}
@@ -2607,6 +2696,21 @@ class Experiment_Manager():
                             avg_time_enhance_cluster_id /= len(splits)
 
                             data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = avg_val_acc
+
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"] = {}
+                            val_accs_tensor = torch.tensor(val_accs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["val"]["mean"] = val_accs_tensor.mean().item()
+                            if len(val_accs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = val_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["val"]["std"] = 0.0
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"] = {}
+                            test_accs_tensor = torch.tensor(test_accs, dtype = torch.float64)
+                            data["experiment_idx"][cur_experiment_idx]["res"]["test"]["mean"] = test_accs_tensor.mean().item()
+                            if len(test_accs) > 1:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = test_accs_tensor.std().item()
+                            else:
+                                data["experiment_idx"][cur_experiment_idx]["res"]["test"]["std"] = 0.0
 
                             data["experiment_idx"][cur_experiment_idx]["splits"] = data_folds
 
