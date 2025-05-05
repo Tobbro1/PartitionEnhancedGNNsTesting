@@ -19,7 +19,7 @@ from torch_geometric.nn import MLP, GINConv, GCNConv, global_add_pool
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 from torch_geometric.logging import log
 from torch_geometric.typing import Adj, OptPairTensor, Size, SparseTensor, OptTensor
-from torch_geometric.utils import spmm
+from torch_geometric.utils import spmm, to_dense_adj, to_torch_csr_tensor
 from torch_geometric.nn.dense.linear import Linear
 
 # System
@@ -751,7 +751,7 @@ class GPNN(torch.nn.Module):
 
         self.W = torch.nn.ParameterList()
         self.omega = torch.nn.ParameterList()
-        for c in self.num_classes:
+        for c in range(self.num_classes):
             self.omega.append(torch.nn.Parameter(torch.randn(1,1)))
             self.W.append(Linear(2 * gpnn_channels + num_classes, gpnn_channels, bias = False, weight_initializer = 'glorot'))
 
@@ -807,11 +807,11 @@ class GPNN(torch.nn.Module):
 
             gpnn_in_channels = self.gpnn_channels
 
-        for p in self.omega:
+        for p in self.omega.parameters():
             sum_p += p.numel()
             sum_p_size += p.nbytes
 
-        for w in self.W:
+        for w in self.W.parameters():
             sum_p += w.numel()
             sum_p_size += w.nbytes
 
@@ -866,10 +866,10 @@ class GPNN(torch.nn.Module):
             sum_p_layer += p.numel()
             sum_p_size_layer += p.nbytes
             dtype = str(p.dtype)
-        self.parameter_props["layer"]["pool"] = {}
-        self.parameter_props["layer"]["pool"]["num"] = sum_p_layer
-        self.parameter_props["layer"]["pool"]["dtype"] = dtype
-        self.parameter_props["layer"]["pool"]["size"] = sum_p_size_layer
+        self.parameter_props["pool"] = {}
+        self.parameter_props["pool"]["num"] = sum_p_layer
+        self.parameter_props["pool"]["dtype"] = dtype
+        self.parameter_props["pool"]["size"] = sum_p_size_layer
 
     def reset_parameters(self):
         for conv in self.vertex_convs:
@@ -887,13 +887,13 @@ class GPNN(torch.nn.Module):
         for p in self.omega:
             p = torch.nn.Parameter(torch.randn(1,1))
 
-        self.W.reset_parameters()
+        for w in self.W:
+            w.reset_parameters()
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
         batch = data.batch
         num_graphs_in_batch = torch.unique(batch).size()[0]
-
 
         edge_index = torch.clone(data.edge_index)
         # gamma_0(v) := clustering_labels[v]
@@ -901,17 +901,18 @@ class GPNN(torch.nn.Module):
         
         # generate alpha => alpha_0(v,w) = edge_label(v,w)
         # generate the initial edge colors
-        num_vertices = x.shape[0]
+        num_vertices = data.x.size()[0]
 
         # generate c adjecency matrices to later quickly evalute the corresponding neighborhoods
         class_adjacencies = []
         # we explicitely convert the edge_index to a sparse tensor
-        edge_index_csr = edge_index.to_torch_sparse_csr_tensor()
         for c in range(self.num_classes):
-            c_adj = torch.clone(edge_index_csr)
-            cols = gamma != c
-            c_adj[:,cols] = 0
-            class_adjacencies.append(c_adj)
+            vertices = torch.arange(0, num_vertices, dtype = torch.long).to(self.device)
+            c_vertices = vertices[(gamma == c).nonzero().view(-1)]
+            edge_index_adj = torch.empty(size = (2,0), dtype = torch.long).to(self.device)
+            for v in c_vertices:
+                edge_index_adj = torch.cat((edge_index_adj, edge_index[:, (edge_index[1] == v).nonzero().view(-1)]), dim = 1)
+            class_adjacencies.append(to_torch_csr_tensor(edge_index_adj))
 
         # Generate the initial alpha
         alpha = torch.empty(size = (num_vertices ** 2,), dtype = torch.float32)
@@ -946,15 +947,15 @@ class GPNN(torch.nn.Module):
             alpha = self.edge_convs[l](alpha, edge_index)
 
             # update gamma
-            gamma = torch.zeros((num_vertices,self.gpnn_channels), dtype = alpha.dtype)
+            gamma = torch.zeros((num_vertices,self.gpnn_channels), dtype = alpha.dtype).to(self.device)
             for c in range(self.num_classes):
-                u_c = torch.zeros(size = (self.num_classes))
+                u_c = torch.zeros(size = (self.num_classes)).to(self.device)
                 u_c[c] = 1
-                vector = torch.empty((num_vertices, self.gpnn_channels))
+                vector = torch.empty((num_vertices, self.gpnn_channels)).to(self.device)
                 for v in range(num_vertices):
                     vector[v,:] = torch.concat((beta, alpha[v * num_vertices:(v+1) * num_vertices,:], u_c), dim = 1)
                     vector = self.W[c](vector)
-                    gamma_v = spmm(c_adj[c], vector)
+                    gamma_v = spmm(class_adjacencies[c], vector)
                     gamma[v,:] += self.omega[c] * gamma_v
 
             gpnn_layer_global_add_pool_res[t,:,:] = global_add_pool(x, batch)

@@ -2303,7 +2303,7 @@ class Experiment_Manager():
 
                                     # Initialize the gnn and dataset parameters
                                     self.gnn.set_dataset_parameters(num_features = dataset.num_features, num_classes = dataset.num_classes, num_clusters = n_cluster)
-                                    self.load_enhanced_gnn(gpnn_channels = gpnn_c, num_gpnn_layers = gpnn_l, gnn_hidden_channels= hidden_channels, num_gnn_layers = n_layers, lr = lr)
+                                    self.load_enhanced_gnn(gpnn_channels = gpnn_c, num_gpnn_layers = gpnn_l, base_gnn_str = self.base_model, gnn_hidden_channels= hidden_channels, num_gnn_layers = n_layers, lr = lr)
                                     data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
 
                                     for idx, split_dict in splits.items():

@@ -107,96 +107,6 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
     
     return dataset, time.time() - t0
 
-
-# # Transforms the features of the given dataset to include the cluster_id so they can be utilised in partition_enhanced_gnns
-# # Recommended usage is giving the path of a metadata output of a feature vector computation as input, otherwise all other attributes must be set
-# # Returns the transformed dataset and 
-# def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix: str, feature_metadata_path: Optional[str] = None, feature_metadata: Optional[Dict] = None, cluster_metadata_path: Optional[str] = None, cluster_metadata: Optional[Dict] = None) -> Tuple[Dataset, float]:
-
-#     # cluster_alg: Clustering_Algorithm, centroids: Optional[np.array] = None, medoids: Optional[np.array] = None
-#     # , database_feature_vectors_path: Optional[str], feature_identifier: Optional[Dict[str, str]], dataset_properties_path: Optional[str], lookup_path: Optional[str]
-#     t0 = time.time()
-
-#     # sanity checks of the input
-#     assert feature_metadata_path is not None or feature_metadata is not None
-#     assert cluster_metadata_path is not None or cluster_metadata is not None
-
-#     if feature_metadata is None:
-#         feature_metadata = util.read_metadata_file(path = osp.join(absolute_path_prefix, feature_metadata_path))
-
-#     if cluster_metadata is None:
-#         cluster_metadata = util.read_metadata_file(path = osp.join(absolute_path_prefix, cluster_metadata_path))
-
-#     centroids = None
-#     medoids = None
-
-#     cluster_alg = Clustering_Algorithm(cluster_metadata["clustering_alg"]["id"])
-#     if cluster_alg == Clustering_Algorithm.k_means:
-#         centroids = util.read_numpy_txt(path = osp.join(absolute_path_prefix, cluster_metadata["result_prop"]["path"]))
-#     elif cluster_alg == Clustering_Algorithm.clarans:
-#         medoids = util.read_numpy_txt(path = osp.join(absolute_path_prefix, cluster_metadata["result_prop"]["path"]))
-
-#     normalize = cluster_metadata["dataset_prop"]["normalized"]
-
-#     pca = None
-#     if cluster_metadata["pca"]["pca_used"]:
-#         pca = util.read_pickle(path = osp.join(absolute_path_prefix, cluster_metadata["pca"]["path"]))
-
-#     # Read relevant dataset feature info from metadata file      
-#     database_feature_vectors_path = feature_metadata["result_prop"]["path"]
-#     feature_identifier = feature_metadata["result_prop"]["feature_identifier"]
-#     dataset_properties_path = feature_metadata["dataset_prop"]["properties_file_path"]
-#     lookup_path = feature_metadata["dataset_prop"]["idx_lookup_path"]
-
-#     num_graphs = dataset.len()
-
-#     # Read dataset properties and indexing necessary to compute feature vectors in case they have not been computed yet
-#     dataset_properties = Dataset_Properties_Manager(absolute_path_prefix = absolute_path_prefix, properties_path = dataset_properties_path)
-#     dataset_properties.initialize_idx_lookups(lookup_path = lookup_path)
-#     node_pred = dataset_properties.properties["node_pred"]
-
-#     # Load computed feature vectors
-#     path = osp.join(absolute_path_prefix, database_feature_vectors_path)
-#     if not osp.exists(path):
-#         raise FileNotFoundError
-    
-#     feature_data, _ = load_svmlight_file(f = path, dtype='float64', zero_based = True)
-#     start_idx = 0
-
-#     # The dataset access via the _data attribute is strongly discouraged since it is already cached. We do it anyway since accessing via pre-transforms is not really feasible in-computation.
-#     # It might be worth trying to access via a https://pytorch-geometric.readthedocs.io/en/stable/modules/transforms.html transform but accessing the relevant information quickly might be challenging
-#     num_total_vertices = dataset._data.x.shape[0]
-#     total_clustering_id_vector = torch.zeros(num_total_vertices)
-#     for graph_id in range(num_graphs):
-#         graph_data = dataset.get(graph_id)
-#         num_vertices = graph_data.num_nodes
-#         if node_pred:
-#             pass
-#         #     # untested
-#         #     cluster_ids = torch.zeros(num_vertices)
-#         #     if feature_identifier["id"] == "k-disk_sp":
-#         #         distances_alphabet = list(range(feature_identifier["k"]))
-#         #     elif feature_identifier["id"] == "r-s-ring_sp":
-#         #         distances_alphabet = list(range(feature_identifier["s"]))
-#         #     sp_features = SP_graph_features(label_alphabet = dataset_properties.properties["label_alphabet"], distances_alphabet = distances_alphabet)
-#         #     for vertex_id in range(num_vertices):
-#         #         cluster_ids[vertex_id] = get_cluster_id_node_pred(vertex_id = vertex_id, dataset_properties = dataset_properties, algorithm = cluster_alg, graph = graph_data, feature_vectors = feature_data, feature_identifier = feature_identifier, sp_features = sp_features, centroids = centroids, medoids = medoids).item()
-#         #     graph_data.x = torch.cat((cluster_ids, graph_data.x), dim = 1)
-#         else:
-#             cluster_ids = get_cluster_ids(graph_id = graph_id, dataset_properties = dataset_properties, algorithm = cluster_alg, pca = pca, normalize = normalize, graph = graph_data, feature_vectors_database = feature_data, feature_identifier = feature_identifier, centroids = centroids, medoids = medoids)
-#             # cluster_ids = cluster_ids.view(-1,1)
-#             total_clustering_id_vector[start_idx:start_idx + num_vertices] = cluster_ids
-#             cluster_ids = cluster_ids.view(-1,1)
-#             dataset._data_list[graph_id].x = torch.cat((cluster_ids, dataset._data_list[graph_id].x.view(-1,1)), dim = 1)
-#         start_idx += num_vertices
-
-#     # This access is again strongly discouraged and bad practice.
-#     if dataset._data.x.dim() == 1:
-#          dataset._data.x = dataset._data.x.view(-1,1)
-#     dataset._data.x = torch.cat((total_clustering_id_vector.view(-1,1), dataset._data.x.view(-1,1)), dim = 1)
-
-#     return dataset, time.time() - t0
-
 def transform_feature_vector(vector, normalize: bool, pca = None) -> np.ndarray:
     if not isinstance(vector, np.ndarray):
         vector = vector.toarray()
@@ -271,37 +181,6 @@ def get_cluster_ids(graph_id: int, dataset_properties: Dataset_Properties_Manage
             
     return get_cluster_ids_from_feature_vectors(feature_vectors = feature_vectors_graph, cluster_alg = algorithm, centroids = centroids, medoids = medoids)
     
-# def get_cluster_id_node_pred(vertex_id: int, dataset_properties: Dataset_Properties_Manager, algorithm: Clustering_Algorithm, graph: Optional[Data] = None, feature_vectors: Optional[spmatrix] = None, feature_identifier: Dict[str, str] = None, sp_features: Optional[SP_graph_features] = None, centroids: Optional[np.array] = None, medoids: Optional[np.array] = None) -> int:
-#     # untested
-
-#     res = None
-    
-#     vertex_identifier = tuple([0, vertex_id])
-
-#     dataset_idx = dataset_properties.get_dataset_idx_from_vertex_identifier(vertex_identifier)
-
-#     if feature_vectors is not None and dataset_idx in dataset_properties.dataset_idx_lookup:
-#         # A feature vector has previously been computed
-#         database_idx = dataset_properties.get_database_idx_from_vertex_identifier(vertex_identifier = vertex_identifier)
-#         res = feature_vectors[database_idx, 2:]
-#     else:
-#         # A feature vector has to be newly computed
-
-#         assert feature_identifier is not None
-
-#         if feature_identifier["id"] == "k-disk_sp":
-#             # k-disk sp features
-#             k = int(feature_identifier["k"])
-#             res, _ = compute_single_k_disk_sp_feature_vector(graph = graph, vertex_id = vertex_id, k = k, sp_features = sp_features)
-
-#         elif feature_identifier["id"] == "r-s-ring_sp":
-#             # r-s-ring sp features
-#             r = int(feature_identifier["r"])
-#             s = int(feature_identifier["s"])
-#             res, _ = compute_single_r_s_ring_sp_feature_vector(graph = graph, vertex_id = vertex_id, r = r, s = s, sp_features = sp_features)
-
-#     return get_cluster_ids_from_feature_vectors(feature_vectors = [res], cluster_alg = algorithm, centroids = centroids, medoids = medoids)
-
 # generate: Whether the feature vectors are newly computed.
 def get_cluster_ids_from_feature_vectors(feature_vectors: List[np.ndarray], cluster_alg: Clustering_Algorithm, centroids: Optional[np.ndarray] = None, medoids: Optional[np.ndarray] = None) -> Tensor:
     result = None

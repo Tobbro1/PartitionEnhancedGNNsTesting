@@ -175,3 +175,5 @@ testscript.py
 2WL_features_backup.py
 # ignore memmap files
 *.np
+.vscode/*
+.vscode/
