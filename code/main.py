@@ -580,14 +580,14 @@ if __name__ == '__main__':
         # We need to backup the experiment configs since we need to execute feature generations first
         experiment_configs = []
 
-        for path in dirlist:
+        for path_idx, path in enumerate(dirlist):
             if path.endswith('.json'):
                 try:
                     config = util.read_metadata_file(path = osp.join(args.directory, path))
                     if "type" in config:
                         if config["type"] == "experiment":
                             # Run experiment
-                            experiment_configs.append(config)
+                            experiment_configs.append((config, path_idx))
                         elif config["type"] == "feature_gen":
                             # Generate features
                             run_feature_gen(config = config, root_path = args.root_path)
@@ -595,8 +595,9 @@ if __name__ == '__main__':
                     print(repr(e))
             
         # Run all experiments
-        for idx, experiment_config in enumerate(experiment_configs):
+        for idx, (experiment_config, path_idx) in enumerate(experiment_configs):
             try:
+                print(f"---   Starting experiment specified in {dirlist[path_idx]}   ---")
                 run_experiment(config = experiment_config, root_path = args.root_path, experiment_idx = idx)
             except Exception as e:
                 print(repr(e))
