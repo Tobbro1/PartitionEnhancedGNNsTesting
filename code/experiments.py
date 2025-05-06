@@ -1292,6 +1292,7 @@ class Experiment_Manager():
                                     data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
                                     data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
                                     data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                                     data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = True
 
                                     vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
@@ -1331,9 +1332,15 @@ class Experiment_Manager():
 
                                     # k-means
                                     if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                        if self.normalize_features:
+                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_gpnn_centroids.txt'
+                                        else:
+                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_gpnn_centroids.txt'
                                     else:
-                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+                                        if self.normalize_features:
+                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_gpnn_centroids.txt'
+                                        else:
+                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_gpnn_centroids.txt'
 
                                     _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
 
@@ -1343,9 +1350,15 @@ class Experiment_Manager():
                                     num_clusters = centroids.shape[0]
 
                                     if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                                        if self.normalize_features:
+                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_gpnn_cluster_metadata.json'
+                                        else:
+                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_gpnn_cluster_metadata.json'
                                     else:
-                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+                                        if self.normalize_features:
+                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_gpnn_cluster_metadata.json'
+                                        else:
+                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_gpnn_cluster_metadata.json'
 
                                     clusterer.write_metadata(path = working_path, filename = metadata_filename)
                                     cluster_metadata = clusterer.get_metadata()
@@ -1511,6 +1524,7 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
                             data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
                             data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                            data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                             data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = False
 
                             vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
@@ -1551,9 +1565,15 @@ class Experiment_Manager():
 
                             # k-means
                             if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                if self.normalize_features:
+                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_centroids.txt'
+                                else:
+                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
                             else:
-                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+                                if self.normalize_features:
+                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_centroids.txt'
+                                else:
+                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
 
                             _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
 
@@ -1563,9 +1583,15 @@ class Experiment_Manager():
                             num_clusters = centroids.shape[0]
 
                             if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                                if self.normalize_features:
+                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_cluster_metadata.json'
+                                else:
+                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
                             else:
-                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+                                if self.normalize_features:
+                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_cluster_metadata.json'
+                                else:
+                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
 
                             clusterer.write_metadata(path = working_path, filename = metadata_filename)
                             cluster_metadata = clusterer.get_metadata()
@@ -2379,6 +2405,7 @@ class Experiment_Manager():
                                     data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
                                     data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
                                     data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                                     data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = True
 
                                     data["experiment_idx"][cur_experiment_idx]["model"] = {}
@@ -2441,9 +2468,15 @@ class Experiment_Manager():
 
                                         # k-means
                                         if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                            if self.normalize_features:
+                                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_gpnn_centroids.txt'
+                                            else:
+                                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_gpnn_centroids.txt'
                                         else:
-                                            centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+                                            if self.normalize_features:
+                                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_gpnn_centroids.txt'
+                                            else:
+                                                centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_gpnn_centroids.txt'
 
                                         _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
 
@@ -2455,9 +2488,15 @@ class Experiment_Manager():
                                             max_num_clusters = num_clusters
 
                                         if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                                            if self.normalize_features:
+                                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_gpnn_cluster_metadata.json'
+                                            else:
+                                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_gpnn_cluster_metadata.json'
                                         else:
-                                            metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+                                            if self.normalize_features:
+                                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_gpnn_cluster_metadata.json'
+                                            else:
+                                                metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_gpnn_cluster_metadata.json'
 
                                         clusterer.write_metadata(path = working_path, filename = metadata_filename)
                                         cluster_metadata = clusterer.get_metadata()
@@ -2573,6 +2612,7 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx]["config"]["pca_dim"] = pca_d
                             data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
                             data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
+                            data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                             data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = False
 
                             data["experiment_idx"][cur_experiment_idx]["model"] = {}
@@ -2635,9 +2675,15 @@ class Experiment_Manager():
 
                                 # k-means
                                 if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
+                                    if self.normalize_features:
+                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_centroids.txt'
+                                    else:
+                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_centroids.txt'
                                 else:
-                                    centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
+                                    if self.normalize_features:
+                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_centroids.txt'
+                                    else:
+                                        centroids_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_centroids.txt'
 
                                 _, centroids, _, clustering_time = clusterer.mini_batch_k_means(n_clusters = n_cluster, min_cluster_size = min_cluster_size, batch_size = constants.mbk_batch_size, n_init = constants.mbk_n_init, max_no_improvement = constants.mbk_max_no_improvement, max_iter = constants.mbk_max_iter)
 
@@ -2649,9 +2695,15 @@ class Experiment_Manager():
                                     max_num_clusters = num_clusters
 
                                 if pca_d > 0 and pca_d < clusterer.dataset.shape[1]:
-                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
+                                    if self.normalize_features:
+                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_norm_cluster_metadata.json'
+                                    else:
+                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_{pca_d}-pca_cluster_metadata.json'
                                 else:
-                                    metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
+                                    if self.normalize_features:
+                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_norm_cluster_metadata.json'
+                                    else:
+                                        metadata_filename = f'{n_cluster}-means_min-{min_cluster_size}-size_cluster_metadata.json'
 
                                 clusterer.write_metadata(path = working_path, filename = metadata_filename)
                                 cluster_metadata = clusterer.get_metadata()
