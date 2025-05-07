@@ -159,7 +159,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         elif key == "mbk_num_init":
             assert isinstance(value, int)
             assert value > 0
-            constants.mbk_batch_size = value
+            constants.mbk_n_init = value
         elif key == "mbk_max_no_improvement":
             assert isinstance(value, int)
             assert value > 0
