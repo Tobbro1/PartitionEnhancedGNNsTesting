@@ -99,7 +99,7 @@ class Experiment_Manager():
     # Initialize variables, set hyperparameter ranges that need to be evaluated
     # base_model: one of 'gin' or 'gcn'
     # dataset_str: one of 'CSL' or h-Prox for any integer h from [1,3,5,8,10]
-    def setup_experiments(self, dataset_str: str, base_model: str = 'gin', use_gpnn: bool = False, gpnn_channels: List[int] = None, gpnn_layers: List[int] = None, is_lovasz_feature: bool = False, 
+    def setup_experiments(self, dataset_str: str, base_model: str = 'gin', use_gpnn: bool = False, use_augmented_gnn: bool = False, gpnn_channels: List[int] = None, gpnn_layers: List[int] = None, is_lovasz_feature: bool = False, 
                           lo_idx_str: str = "", k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
                           num_clusters: List[int] = None, pca_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
                           hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, exp_mode: int = -1, max_patience: Optional[int] = None,
@@ -125,6 +125,7 @@ class Experiment_Manager():
         self.normalize_features = normalize_features
         self.base_model = base_model
 
+        self.use_augmented_gnn = use_augmented_gnn
         self.use_gpnn = use_gpnn
         self.gpnn_layers = gpnn_layers
         self.gpnn_channels = gpnn_channels
@@ -137,12 +138,16 @@ class Experiment_Manager():
             self.load_classic_gnn = self.gnn.generate_classic_GIN_model
             if self.use_gpnn:
                 self.load_enhanced_gnn = self.gnn.generate_GPNN_model
+            elif self.use_augmented_gnn:
+                self.load_enhanced_gnn = self.gnn.generate_classic_GIN_model
             else:
                 self.load_enhanced_gnn = self.gnn.generate_partition_enhanced_GIN_model
         elif base_model == 'gcn':
             self.load_classic_gnn = self.gnn.generate_classic_GCN_model
             if self.use_gpnn:
                 self.load_enhanced_gnn = self.gnn.generate_GPNN_model
+            elif self.use_augmented_gnn:
+                self.load_enhanced_gnn = self.gnn.generate_classic_GCN_model
             else:
                 self.load_enhanced_gnn = self.gnn.generate_partition_enhanced_GCN_model
         else:
@@ -891,6 +896,15 @@ class Experiment_Manager():
         num_experiments = (len(self.num_layers) * len(self.hidden_channels) * len(self.batch_sizes) * len(self.num_epochs) * len(self.lrs))
         data["num_experiments"] = num_experiments
 
+        if classic_gnn:
+            data["model_type"] = "classic_gnn"
+        elif self.use_augmented_gnn:
+            data["model_type"] = "augmented_gnn"
+        elif self.use_gpnn:
+            data["model_type"] = "gpnn"
+        else:
+            data["model_type"] = "enhanced_gnn"
+
         # # Will be overwritten if training enhanced gnn hyperparameters
         # if self.dataset_str == 'CSL':
         #     dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
@@ -974,10 +988,14 @@ class Experiment_Manager():
                                 self.load_classic_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
                                 desc_str = f'{self.dataset_str}_classic_{self.model_str}_exp-{cur_experiment_idx}'
                             else:
-                                self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = best_num_clusters)
                                 if self.use_gpnn:
+                                    self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = best_num_clusters)
                                     self.load_enhanced_gnn(num_gpnn_layers = best_num_gpnn_layers, gpnn_channels = best_gpnn_channels, gnn_hidden_channels = n_hidden_channels, base_gnn_str = self.base_model, num_gnn_layers = n_layers, lr = lr)
+                                elif self.use_augmented_gnn:
+                                    self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features + 1, num_clusters = best_num_clusters)
+                                    self.load_enhanced_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
                                 else:
+                                    self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = best_num_clusters)
                                     self.load_enhanced_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
                                 desc_str = f'{self.dataset_str}_enhanced_{self.model_str}_exp-{cur_experiment_idx}/{num_experiments}'
 
@@ -1039,11 +1057,11 @@ class Experiment_Manager():
                                     self.train_ogb(gnn = self.gnn, loader = train_loader, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train')
 
                                     # evaluate the results
-                                    train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
+                                    # train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
                                     val_perf = self.eval_ogb(gnn = self.gnn, loader = val_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_val_eval')[dataset.eval_metric].item()
                                     test_perf = self.eval_ogb(gnn = self.gnn, loader = test_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_test_eval')[dataset.eval_metric].item()
 
-                                    rerun_data[cur_rerun]["epoch"][epoch]["perf"] = {'Train': train_perf, 'Validation': val_perf, 'Test': test_perf}
+                                    # rerun_data[cur_rerun]["epoch"][epoch]["perf"] = {'Train': train_perf, 'Validation': val_perf, 'Test': test_perf}
 
                                     if best_rerun_val_perf < val_perf:
                                         best_rerun_val_perf = val_perf
@@ -1219,6 +1237,13 @@ class Experiment_Manager():
         data["num_experiments"] = num_experiments
 
         data["model"] = {}
+
+        if self.use_augmented_gnn:
+            data["model_type"] = "augmented_gnn"
+        elif self.use_gpnn:
+            data["model_type"] = "gpnn"
+        else:
+            data["model_type"] = "enhanced_gnn"
 
         # The best hyperparameters
         data["res"] = {}
@@ -1427,7 +1452,7 @@ class Experiment_Manager():
                                             self.train_ogb(gnn = self.gnn, loader = train_loader, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train')
 
                                             # evaluate the results
-                                            train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
+                                            # train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
                                             val_perf = self.eval_ogb(gnn = self.gnn, loader = val_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_val_eval')[dataset.eval_metric].item()
                                             test_perf = self.eval_ogb(gnn = self.gnn, loader = test_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_test_eval')[dataset.eval_metric].item()
 
@@ -1541,7 +1566,10 @@ class Experiment_Manager():
 
                             evaluator = Evaluator(self.dataset_str)
 
-                            desc_str = f'{self.dataset_str}_enhanced_{self.model_str}_cluster_exp-{cur_experiment_idx}/{num_experiments}'
+                            if self.use_augmented_gnn:
+                                desc_str = f'{self.dataset_str}_augmented_{self.model_str}_cluster_exp-{cur_experiment_idx}/{num_experiments}'
+                            else:
+                                desc_str = f'{self.dataset_str}_enhanced_{self.model_str}_cluster_exp-{cur_experiment_idx}/{num_experiments}'
 
                             # data_folds stores the data for a single fold
                             data_folds = {}
@@ -1600,7 +1628,10 @@ class Experiment_Manager():
                             data_folds["cluster_metadata_path"] = cluster_metadata_path
 
                             # generate the gnn
-                            self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = num_clusters)
+                            if self.use_augmented_gnn:
+                                self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features + 1, num_clusters = num_clusters)
+                            else:
+                                self.gnn.set_dataset_parameters(num_classes = dataset.num_tasks, num_features = dataset.num_features, num_clusters = num_clusters)
                             self.load_enhanced_gnn(hidden_channels = hidden_channels, num_layers = n_layers, lr = lr)
                             data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
 
@@ -1657,7 +1688,7 @@ class Experiment_Manager():
                                     self.train_ogb(gnn = self.gnn, loader = train_loader, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train')
 
                                     # evaluate the results
-                                    train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
+                                    # train_perf = self.eval_ogb(gnn = self.gnn, loader = train_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_train_eval')[dataset.eval_metric].item()
                                     val_perf = self.eval_ogb(gnn = self.gnn, loader = val_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_val_eval')[dataset.eval_metric].item()
                                     test_perf = self.eval_ogb(gnn = self.gnn, loader = test_loader, evaluator = evaluator, desc = f'{desc_str}_rerun-{cur_rerun}/{self.num_reruns}_epoch-{epoch}/{n_epoch}_test_eval')[dataset.eval_metric].item()
 
@@ -1935,6 +1966,15 @@ class Experiment_Manager():
 
         data["num_experiments"] = (len(self.num_layers) * len(self.hidden_channels) * len(self.batch_sizes) * len(self.num_epochs) * len(self.lrs))
 
+        if classic_gnn:
+            data["model_type"] = "classic_gnn"
+        elif self.use_augmented_gnn:
+            data["model_type"] = "augmented_gnn"
+        elif self.use_gpnn:
+            data["model_type"] = "gpnn"
+        else:
+            data["model_type"] = "enhanced_gnn"
+
         # Will be overwritten if training enhanced gnn hyperparameters
         if self.dataset_str == 'CSL':
             dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
@@ -2009,7 +2049,10 @@ class Experiment_Manager():
                             if classic_gnn:
                                 self.gnn.set_dataset_parameters(num_classes = dataset.num_classes, num_features = dataset.num_features, num_clusters = 0)
                             else:
-                                self.gnn.set_dataset_parameters(num_classes = dataset.num_classes, num_features = dataset.num_features, num_clusters = best_num_clusters)
+                                if self.use_augmented_gnn:
+                                    self.gnn.set_dataset_parameters(num_classes = dataset.num_classes, num_features = dataset.num_features + 1, num_clusters = best_num_clusters)
+                                else:
+                                    self.gnn.set_dataset_parameters(num_classes = dataset.num_classes, num_features = dataset.num_features, num_clusters = best_num_clusters)
 
                             if classic_gnn:
                                 self.load_classic_gnn(hidden_channels = n_hidden_channels, num_layers = n_layers, lr = lr)
@@ -2310,6 +2353,13 @@ class Experiment_Manager():
             raise ValueError("Invalid vertex feature identifiers")
         
         data["num_experiments"] = num_experiments
+        
+        if self.use_augmented_gnn:
+            data["model_type"] = "augmented_gnn"
+        elif self.use_gpnn:
+            data["model_type"] = "gpnn"
+        else:
+            data["model_type"] = "enhanced_gnn"
 
         data["model"] = {}
 
@@ -2635,7 +2685,10 @@ class Experiment_Manager():
                             val_accs = []
 
                             # Initialize the gnn and dataset parameters
-                            self.gnn.set_dataset_parameters(num_features = dataset.num_features, num_classes = dataset.num_classes, num_clusters = n_cluster)
+                            if self.use_augmented_gnn:
+                                self.gnn.set_dataset_parameters(num_features = dataset.num_features + 1, num_classes = dataset.num_classes, num_clusters = n_cluster)
+                            else:
+                                self.gnn.set_dataset_parameters(num_features = dataset.num_features, num_classes = dataset.num_classes, num_clusters = n_cluster)
                             self.load_enhanced_gnn(hidden_channels = hidden_channels, num_layers = n_layers, lr = lr)
                             data["experiment_idx"][cur_experiment_idx]["model"] = self.gnn.get_metadata()
 

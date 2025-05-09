@@ -42,6 +42,7 @@ def gen_experiment_config_file(root_path: str) -> None:
     config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
     config["dataset"]["use_gpnn"] = False
+    config["dataset"]["use_augmented_gnn"] = False
     config["dataset"]["feature_type"] = "---   'sp' or 'lo', only utilised for k-disks or r-s-rings   ---"
     config["dataset"]["lo_feature_idx"] = "---   Index of the Lovasz features that should be utilised, use '0' if only one feature has been generated. Ignored if feature_type is not 'lo'   ---"
     config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
@@ -93,6 +94,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     lo_idx_str = ""
 
     use_gpnn = False
+    use_augmented_gnn = False
     gpnn_channels = []
     gpnn_layers = []
 
@@ -227,9 +229,13 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         elif key == "use_gpnn":
             assert isinstance(value, bool)
             use_gpnn = value
+        elif key == "use_augmented_gnn":
+            assert isinstance(value, bool)
+            use_augmented_gnn = value
         else:
             raise ValueError(f'Invalid key {key} in config["dataset"]')
         
+    assert not (use_gpnn and use_augmented_gnn)
     assert dataset_str is not None and base_model is not None
     assert k is not None or (r is not None and s is not None) or is_vertex_sp_features
     if r is not None:
@@ -287,7 +293,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     manager = Experiment_Manager(root_path = root_path)
 
     try:
-        manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, use_gpnn = use_gpnn, gpnn_channels = gpnn_channels, gpnn_layers = gpnn_layers,
+        manager.setup_experiments(dataset_str = dataset_str, base_model = base_model, use_gpnn = use_gpnn, use_augmented_gnn = use_augmented_gnn, gpnn_channels = gpnn_channels, gpnn_layers = gpnn_layers,
                                   is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
                                     pca_dims = pca_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
                                     num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, exp_mode = exp_mode, max_patience = constants.max_patience, lo_idx_str = lo_idx_str,
