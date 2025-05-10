@@ -970,6 +970,9 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx]["config"] = {}
                             data["experiment_idx"][cur_experiment_idx]["config"]["batch_size"] = s_batch
                             data["experiment_idx"][cur_experiment_idx]["config"]["num_epochs"] = n_epoch
+                            if not classic_gnn:
+                                data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = self.use_gpnn
+                                data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = self.use_augmented_gnn
 
                             # Load dataset and split
                             dataset = PygGraphPropPredDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path))
@@ -1236,7 +1239,7 @@ class Experiment_Manager():
         
         data["num_experiments"] = num_experiments
 
-        data["model"] = {}
+        # data["model"] = {}
 
         if self.use_augmented_gnn:
             data["model_type"] = "augmented_gnn"
@@ -1318,7 +1321,8 @@ class Experiment_Manager():
                                     data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
                                     data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
                                     data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
-                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = True
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = self.use_gpnn
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = self.use_augmented_gnn
 
                                     vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
 
@@ -1550,7 +1554,8 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx]["config"]["min_cluster_size"] = min_cluster_size
                             data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
                             data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
-                            data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = False
+                            data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = self.use_gpnn
+                            data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = self.use_augmented_gnn
 
                             vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
 
@@ -2041,6 +2046,10 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx]["config"] = {}
                             data["experiment_idx"][cur_experiment_idx]["config"]["batch_size"] = s_batch
                             data["experiment_idx"][cur_experiment_idx]["config"]["num_epochs"] = n_epoch
+                            if not classic_gnn:
+                                data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = self.use_gpnn
+                                data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = self.use_augmented_gnn
+
                             # stored data:
                             # avg val acc
                             # foreach fold: avg val acc, split props, rerun data
@@ -2361,7 +2370,7 @@ class Experiment_Manager():
         else:
             data["model_type"] = "enhanced_gnn"
 
-        data["model"] = {}
+        # data["model"] = {}
 
         # The best hyperparameters
         data["res"] = {}
@@ -2457,6 +2466,7 @@ class Experiment_Manager():
                                     data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
                                     data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                                     data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = True
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = False
 
                                     data["experiment_idx"][cur_experiment_idx]["model"] = {}
                                     data["experiment_idx"][cur_experiment_idx]["splits"] = {}
@@ -2493,10 +2503,11 @@ class Experiment_Manager():
                                         train_indices = split_dict["train"]
                                         val_indices = split_dict["val"]
 
-                                        if self.dataset_str == 'CSL':
-                                            split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
-                                        elif self.dataset_str.endswith('-Prox'):
+                                        
+                                        if self.dataset_str.endswith('-Prox'):
                                             split_prop = { "desc" : f"fixed_{self.h}-Prox", "split_mode" : "fixed", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+                                        else:
+                                            split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
 
                                         data_folds[idx]["split_prop"] = split_prop
 
@@ -2664,6 +2675,7 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
                             data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                             data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = False
+                            data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = True
 
                             data["experiment_idx"][cur_experiment_idx]["model"] = {}
                             data["experiment_idx"][cur_experiment_idx]["splits"] = {}
@@ -2703,10 +2715,10 @@ class Experiment_Manager():
                                 train_indices = split_dict["train"]
                                 val_indices = split_dict["val"]
 
-                                if self.dataset_str == 'CSL':
-                                    split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
-                                elif self.dataset_str.endswith('-Prox'):
+                                if self.dataset_str.endswith('-Prox'):
                                     split_prop = { "desc" : f"fixed_{self.h}-Prox", "split_mode" : "fixed", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
+                                else:
+                                    split_prop = { "desc" : f"{len(splits)}-fold_CV", "split_mode" : "CV", "num_samples" : { "train" : len(train_indices), "val" : len(val_indices), "test" : len(test_indices) }, "split_idx" : idx}
 
                                 data_folds[idx]["split_prop"] = split_prop
 
