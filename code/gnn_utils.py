@@ -61,7 +61,7 @@ def include_cluster_id_feature_transform(dataset: Dataset, absolute_path_prefix:
                     feature_dataset_path = vertex_feature_metadata["result_prop"]["path"]
 
                 # Read feature dataset from disk
-                feature_dataset = load_svmlight_file(f = feature_dataset_path, dtype='float64', zero_based = True)[0][:,2:]
+                feature_dataset = load_svmlight_file(f = osp.join(absolute_path_prefix, feature_dataset_path), dtype='float64', zero_based = True)[0][:,2:]
                 # feature_dataset = np.delete(feature_dataset, [0,1], axis = 1)
 
                 if normalize:

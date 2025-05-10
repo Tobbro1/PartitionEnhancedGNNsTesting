@@ -4,9 +4,9 @@ import os.path as osp
 import util
 import constants
 
-output_root_folder = "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\partition_enhanced"
+output_root_folder = "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\clustering_augmented"
 prev_res_folder = "/home/tobias/bachelorthesis/PartitionEnhancedGNNsTesting/experiments/results"
-stage = 2 # 0 -> only classical, 1 -> only clustering, 2 -> only enhanced/augmented, 3 -> all stages
+stage = 1 # 0 -> only classical, 1 -> only clustering, 2 -> only enhanced/augmented, 3 -> all stages
 
 k_vals = [3]
 r_vals = [1, 2]
@@ -18,8 +18,8 @@ max_patience = 5
 num_clusters = [2, 3, 4]
 pca_dims = [0, 10, 30]
 min_cluster_size = [0]
-num_layers = [2, 3]
-num_hidden_channels = [32, 64, 128, 256]
+num_layers = [3, 5]
+num_hidden_channels = [64, 128, 256]
 num_batch_sizes = [32]
 num_epochs = [100]
 lrs = [0.01]
@@ -30,8 +30,8 @@ models = ["gin", "gcn"]
 # create with and without batch norm for final enhanced gnn version
 # create normalized and non-normalized vertex features
 is_linux = True
-gen_enhanced_gnn = True
-gen_augmented_gnn = False
+gen_enhanced_gnn = False
+gen_augmented_gnn = True
 
 feature_type = "SP"
 lo_feature_index = 0
@@ -168,7 +168,7 @@ def gen_clustering_config():
 
                         filename = f"{title}.json"
 
-                        path = osp.join(output_root_folder, "clustering_enhanced_gnn", model)
+                        path = osp.join(output_root_folder, "clustering_enhanced_gnn", f"{k}-disk", f"{n_cluster}-cluster", model)
 
                         if is_linux:
                             prev_result_path = f"{prev_res_folder}/{f"{dataset}_classical_{model}"}.json"
@@ -228,7 +228,7 @@ def gen_clustering_config():
 
                         filename = f"{title}.json"
 
-                        path = osp.join(output_root_folder, "clustering_augmented_gnn", model)
+                        path = osp.join(output_root_folder, "clustering_augmented_gnn", f"{k}-disk", f"{n_cluster}-cluster", model)
 
                         if is_linux:
                             prev_result_path = f"{prev_res_folder}/{f"{dataset}_classical_{model}"}.json"
@@ -289,7 +289,7 @@ def gen_clustering_config():
 
                         filename = f"{title}.json"
 
-                        path = osp.join(output_root_folder, "clustering_enhanced_gnn", model)
+                        path = osp.join(output_root_folder, "clustering_enhanced_gnn", f"{r_vals[idx]}-{s_vals[idx]}-ring", f"{n_cluster}-cluster", model)
 
                         if is_linux:
                             prev_result_path = f"{prev_res_folder}/{f"{dataset}_classical_{model}"}.json"
@@ -349,7 +349,7 @@ def gen_clustering_config():
 
                         filename = f"{title}.json"
 
-                        path = osp.join(output_root_folder, "clustering_augmented_gnn", model)
+                        path = osp.join(output_root_folder, "clustering_augmented_gnn", f"{r_vals[idx]}-{s_vals[idx]}-ring", f"{n_cluster}-cluster", model)
 
                         if is_linux:
                             prev_result_path = f"{prev_res_folder}/{f"{dataset}_classical_{model}"}.json"
@@ -410,7 +410,7 @@ def gen_clustering_config():
 
                         filename = f"{title}.json"
 
-                        path = osp.join(output_root_folder, "clustering_enhanced_gnn", model)
+                        path = osp.join(output_root_folder, "clustering_enhanced_gnn", f"vsp", f"{n_cluster}-cluster", model)
 
                         if is_linux:
                             prev_result_path = f"{prev_res_folder}/{f"{dataset}_classical_{model}"}.json"
@@ -470,7 +470,7 @@ def gen_clustering_config():
 
                         filename = f"{title}.json"
 
-                        path = osp.join(output_root_folder, "clustering_augmented_gnn", model)
+                        path = osp.join(output_root_folder, "clustering_augmented_gnn", f"vsp", f"{n_cluster}-cluster", model)
 
                         if is_linux:
                             prev_result_path = f"{prev_res_folder}/{f"{dataset}_classical_{model}"}.json"
