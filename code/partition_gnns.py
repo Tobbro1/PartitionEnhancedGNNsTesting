@@ -74,7 +74,7 @@ class Partition_enhanced_GIN(torch.nn.Module):
         self.num_layers = num_layers
 
         self.hidden_channels = hidden_channels
-        self.hidden_in_channel_diff = hidden_channels - in_channels
+        self.in_channels = in_channels
 
         self.use_batch_norm = use_batch_norm
 
@@ -156,7 +156,7 @@ class Partition_enhanced_GIN(torch.nn.Module):
     
     # vertex_idx_start represents the first idx of clustering_labels which corresponds to a vertex of the graph data
     def forward(self, data: Data):
-        x = torch.cat((data.x[:,1:], torch.zeros((data.x.size()[0], self.hidden_in_channel_diff)).to(self.device)), dim = 1).to(dtype = torch.float32)
+        x = torch.cat((data.x[:,1:], torch.zeros((data.x.size()[0], (self.hidden_channels - self.in_channels))).to(self.device)), dim = 1).to(dtype = torch.float32)
         clustering_labels = data.x[:,0]
         edge_index = data.edge_index
         batch = data.batch
@@ -177,7 +177,7 @@ class Partition_enhanced_GIN(torch.nn.Module):
                 # This distinction is necessary. We cannot simply override x after a single convolution since we apply different convolutions within the same layers (Including the initial layer where the dimensionality is increased to the value of hidden_channels).
                 # That means, we need to store intermediary results, meaning we artificially enlarge the feature dimension of x in the first step, and we have to account for the artificially large dimension in the first step layer.
                 if t == 0:
-                    x[mask,:] = self.convs[conv_idx](x[:,:(x.size()[1] - self.hidden_in_channel_diff)], edge_index, mask)
+                    x[mask,:] = self.convs[conv_idx](x[:,:(x.size()[1] - (self.hidden_channels - self.in_channels))], edge_index, mask)
                 else:
                     x[mask,:] = self.convs[conv_idx](x, edge_index, mask)
                 # x = self.convs[conv_idx](torch.masked_select(x, mask), edge_index)

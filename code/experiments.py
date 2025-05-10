@@ -1980,14 +1980,6 @@ class Experiment_Manager():
         else:
             data["model_type"] = "enhanced_gnn"
 
-        # Will be overwritten if training enhanced gnn hyperparameters
-        if self.dataset_str == 'CSL':
-            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
-        elif self.dataset_str.endswith('-Prox'):
-            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
-        else:
-            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
-
         # The best hyperparameters
         data["res"] = {}
         data["res"]["best_avg_val_acc"] = -1.0
@@ -2040,6 +2032,14 @@ class Experiment_Manager():
                     for n_epoch in self.num_epochs:
                         for lr in self.lrs:
                             experiment_start = time.time()
+
+                            # Will be overwritten if training enhanced gnn hyperparameters
+                            if self.dataset_str == 'CSL':
+                                dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                            elif self.dataset_str.endswith('-Prox'):
+                                dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                            else:
+                                dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
 
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
@@ -2119,7 +2119,7 @@ class Experiment_Manager():
                                     else:
                                         dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
                                     feature_metadata_path = best_vertex_feature_metadata_path
-                                    if 0 in best_clustering_paths:
+                                    if idx in best_clustering_paths:
                                         dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, vertex_feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[idx])
                                     else:
                                         dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, vertex_feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[str(idx)])

@@ -33,7 +33,7 @@ is_linux = True
 gen_enhanced_gnn = False
 gen_augmented_gnn = True
 
-feature_type = "SP"
+feature_type = "sp"
 lo_feature_index = 0
 num_gpnn_layers = [2]
 num_gpnn_channels = [32]
