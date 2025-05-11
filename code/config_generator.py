@@ -4,32 +4,32 @@ import os.path as osp
 import util
 import constants
 
-output_root_folder = "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\CSL" # "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\augmented_gnn"
+output_root_folder = "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox" # "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\augmented_gnn"
 prev_res_folder = "/home/tobias/bachelorthesis/PartitionEnhancedGNNsTesting/experiments/results" # "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\results" # 
-stage = 1 # 0 -> only classical, 1 -> only clustering, 2 -> only enhanced/augmented, 3 -> all stages
+stage = 2 # 0 -> only classical, 1 -> only clustering, 2 -> only enhanced/augmented, 3 -> all stages
 
-k_vals = [3, 10]
-r_vals = [3, 5]
-s_vals = [10, 10]
+k_vals = [3]
+r_vals = [1, 2]
+s_vals = [3, 3]
 vertex_sp = True
 num_reruns = 3
-max_patience = 10
+max_patience = 5
 
-num_clusters = [2, 5, 10]
+num_clusters = [2, 3, 4]
 pca_dims = [0, 10, 30]
 min_cluster_size = [0]
-num_layers = [3, 5]
-num_hidden_channels = [64, 128, 256]
-num_batch_sizes = [32, 64]
-num_epochs = [100]
+num_layers = [2, 3]
+num_hidden_channels = [32, 128, 256]
+num_batch_sizes = [32]
+num_epochs = [20]
 lrs = [0.01]
 
-dataset = "CSL"
+dataset = "3-Prox"
 models = ["gin", "gcn"]
 # create both models
 # create with and without batch norm for final enhanced gnn version
 # create normalized and non-normalized vertex features
-is_linux = False
+is_linux = True
 gen_enhanced_gnn = True
 gen_augmented_gnn = False
 

@@ -542,6 +542,7 @@ class Vertex_Partition_Clustering():
 
     def set_split(self, split: Tensor, split_prop: Dict) -> None:
         graph_ids = split.tolist()
+        graph_ids.sort()
         # We need to convert the graph indices to vertex indices
         vertex_indices = []
         last_graph_id = 0
