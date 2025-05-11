@@ -404,7 +404,8 @@ class Experiment_Manager():
         data["res"] = {}
 
         # Optimize cluster hyperparameter
-        clusterer = Vertex_Partition_Clustering(self.root_path)
+        dataset_prop_path = osp.join(self.dataset_path, "results", "properties.json")
+        clusterer = Vertex_Partition_Clustering(self.root_path, dataset_prop_path)
 
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
@@ -492,7 +493,9 @@ class Experiment_Manager():
 
 
         # Optimize cluster hyperparameter
-        clusterer = Vertex_Partition_Clustering(self.root_path)
+        dataset_prop_path = osp.join(self.dataset_path, "results", "properties.json")
+        clusterer = Vertex_Partition_Clustering(self.root_path, dataset_prop_path)
+
 
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
@@ -790,7 +793,9 @@ class Experiment_Manager():
         # best_classic_lr = 0.01
 
         # Optimize cluster hyperparameter
-        clusterer = Vertex_Partition_Clustering(self.root_path)
+        dataset_prop_path = osp.join(self.dataset_path, "results", "properties.json")
+        clusterer = Vertex_Partition_Clustering(self.root_path, dataset_prop_path)
+
 
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
@@ -1868,7 +1873,9 @@ class Experiment_Manager():
         # best_classic_lr = 0.01
 
         # Optimize cluster hyperparameter
-        clusterer = Vertex_Partition_Clustering(self.root_path)
+        dataset_prop_path = osp.join(self.dataset_path, "results", "properties.json")
+        clusterer = Vertex_Partition_Clustering(self.root_path, dataset_prop_path)
+
 
         print('---   Optimizing clustering hyperparameters   ---')
         # We do not need the explicit best features since we utilise the paths of the best result instead to avoid re-computing the clusterings
@@ -2469,7 +2476,7 @@ class Experiment_Manager():
                                     data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
                                     data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                                     data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = True
-                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = False
+                                    data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = self.use_augmented_gnn
 
                                     data["experiment_idx"][cur_experiment_idx]["model"] = {}
                                     data["experiment_idx"][cur_experiment_idx]["splits"] = {}
@@ -2678,7 +2685,7 @@ class Experiment_Manager():
                             data["experiment_idx"][cur_experiment_idx]["config"]["vertex_feature_path"] = vertex_feature_path
                             data["experiment_idx"][cur_experiment_idx]["config"]["normalize_features"] = self.normalize_features
                             data["experiment_idx"][cur_experiment_idx]["config"]["use_gpnn"] = False
-                            data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = True
+                            data["experiment_idx"][cur_experiment_idx]["config"]["use_augmented_gnn"] = self.use_augmented_gnn
 
                             data["experiment_idx"][cur_experiment_idx]["model"] = {}
                             data["experiment_idx"][cur_experiment_idx]["splits"] = {}

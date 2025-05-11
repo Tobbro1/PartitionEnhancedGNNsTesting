@@ -43,6 +43,7 @@ import constants
 # own functionality
 from clarans import Clarans
 import util
+import dataset_property_util
 
 class Clustering_Algorithm(Enum):
     k_means = 0
@@ -52,7 +53,7 @@ class Clustering_Algorithm(Enum):
 
 class Vertex_Partition_Clustering():
 
-    def __init__(self, absolute_path_prefix: str):
+    def __init__(self, absolute_path_prefix: str, properties_path: str):
         super().__init__()
 
         self.absolute_path_prefix = absolute_path_prefix
@@ -69,6 +70,8 @@ class Vertex_Partition_Clustering():
 
         self.pca = None
         self.draw_pca = None
+
+        self.dataset_properties = dataset_property_util.Dataset_Properties_Manager(absolute_path_prefix = absolute_path_prefix, properties_path = properties_path)
 
         # Metadata collected while clustering
         # dataset_prop: path, desc, normalized
@@ -103,51 +106,20 @@ class Vertex_Partition_Clustering():
         # self.metadata["data_split"]["split_idx"] = -1
         self.metadata["pca"] = {}
         self.metadata["pca"]["pca_used"] = False
-        # if pca_used
-        # self.metadata["pca"]["path"] = ""
-        # self.metadata["pca"]["result_prop"] = {}
-        # self.metadata["pca"]["result_prop"]["num_features_seen"] = -1
-        # self.metadata["pca"]["result_prop"]["explained_variances"] = {}
-        # # foreach component: { variance, var_ratio } 
-        # self.metadata["pca"]["config"] = {}
-        # self.metadata["pca"]["config"]["algorithm"] = ""
-        # self.metadata["pca"]["config"]["num_components"] = -1
-        # # if randomized:
-        # # self.metadata["pca"]["config"]["num_iter"] = -1
-        # # self.metadata["pca"]["config"]["num_oversamples"] = -1
-        # # self.metadata["pca"]["config"]["power_iteration_normalizer"] = ""
-        # # if arpack:
-        # # self.metadata["pca"]["config"]["tol"] = -1.0
+
         self.metadata["result_prop"] = {}
         self.metadata["result_prop"]["desc"] = ""
         self.metadata["result_prop"]["path"] = ""
         self.metadata["result_prop"]["size"] = {}
         self.metadata["result_prop"]["size"]["array"] = -1
         self.metadata["result_prop"]["size"]["disk"] = -1
-        # if k_means
-        # self.metadata["result_prop"]["num_centroids"] = -1
-        # self.metadata["result_prop"]["num_dim"] = -1
-        # self.metadata["result_prop"]["inertia"] = 0.0
-        # self.metadata["result_prop"]["num_iter"] = -1
-        # self.metadata["result_prop"]["num_steps"] = -1
-        # self.metadata["result_prop"]["num_features_seen"] = -1
+
         self.metadata["times"] = {}
         self.metadata["times"]["read_from_disk"] = -1.0
         self.metadata["times"]["write_on_disk"] = -1.0
         # self.metadata["times"]["pca_comp"] = -1.0 # if pca
         self.metadata["times"]["clustering"] = -1.0
         self.metadata["config"] = {}
-        # # if k_means
-        # self.metadata["config"]["num_clusters"] = -1
-        # self.metadata["config"]["init_method"] = ""
-        # self.metadata["config"]["max_iter"] = -1
-        # self.metadata["config"]["batch_size"] = -1
-        # self.metadata["config"]["max_no_improvement"] = -1
-        # self.metadata["config"]["num_inits"] = -1
-        # self.metadata["config"]["num_init_random_samples"] = -1
-        # self.metadata["config"]["reassignment_ratio"] = -1.0
-        # self.metadata["config"]["tol"] = -1.0
-
 
     def reset_parameters_and_metadata(self) -> None:
         self.dataset = None
@@ -189,54 +161,22 @@ class Vertex_Partition_Clustering():
         self.metadata["data_split"]["desc"] = ""
         self.metadata["data_split"]["split_mode"] = ""
         self.metadata["data_split"]["num_samples"] = ""
-        # self.metadata["data_split"]["split_idx"] = -1
+
         self.metadata["pca"] = {}
         self.metadata["pca"]["pca_used"] = False
-        # if pca_used
-        # self.metadata["pca"]["path"] = ""
-        # self.metadata["pca"]["result_prop"] = {}
-        # self.metadata["pca"]["result_prop"]["num_features_seen"] = -1
-        # self.metadata["pca"]["result_prop"]["explained_variances"] = {}
-        # # foreach component: { variance, var_ratio } 
-        # self.metadata["pca"]["config"] = {}
-        # self.metadata["pca"]["config"]["algorithm"] = ""
-        # self.metadata["pca"]["config"]["num_components"] = -1
-        # # if randomized:
-        # # self.metadata["pca"]["config"]["num_iter"] = -1
-        # # self.metadata["pca"]["config"]["num_oversamples"] = -1
-        # # self.metadata["pca"]["config"]["power_iteration_normalizer"] = ""
-        # # if arpack:
-        # # self.metadata["pca"]["config"]["tol"] = -1.0
+
         self.metadata["result_prop"] = {}
         self.metadata["result_prop"]["desc"] = ""
         self.metadata["result_prop"]["path"] = ""
         self.metadata["result_prop"]["size"] = {}
         self.metadata["result_prop"]["size"]["array"] = -1
         self.metadata["result_prop"]["size"]["disk"] = -1
-        # if k_means
-        # self.metadata["result_prop"]["num_centroids"] = -1
-        # self.metadata["result_prop"]["num_dim"] = -1
-        # self.metadata["result_prop"]["inertia"] = 0.0
-        # self.metadata["result_prop"]["num_iter"] = -1
-        # self.metadata["result_prop"]["num_steps"] = -1
-        # self.metadata["result_prop"]["num_features_seen"] = -1
+
         self.metadata["times"] = {}
         self.metadata["times"]["read_from_disk"] = -1.0
         self.metadata["times"]["write_on_disk"] = -1.0
-        # self.metadata["times"]["pca_comp"] = -1.0 # if pca
-        # self.metadata["times"]["pca_application"] = -1.0
         self.metadata["times"]["clustering"] = -1.0
         self.metadata["config"] = {}
-        # # if k_means
-        # self.metadata["config"]["num_clusters"] = -1
-        # self.metadata["config"]["init_method"] = ""
-        # self.metadata["config"]["max_iter"] = -1
-        # self.metadata["config"]["batch_size"] = -1
-        # self.metadata["config"]["max_no_improvement"] = -1
-        # self.metadata["config"]["num_inits"] = -1
-        # self.metadata["config"]["num_init_random_samples"] = -1
-        # self.metadata["config"]["reassignment_ratio"] = -1.0
-        # self.metadata["config"]["tol"] = -1.0
 
     # Returns a tuple of the learned components and the ratio of their explained variance
     def generate_pca(self, target_dimensions: int, write_pca_path: Optional[str] = None, write_pca_filename: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
@@ -601,7 +541,20 @@ class Vertex_Partition_Clustering():
         self.metadata["times"]["read_from_disk"] = time.time() - t0
 
     def set_split(self, split: Tensor, split_prop: Dict) -> None:
-        self.split = split.numpy()
+        graph_ids = split.tolist()
+        # We need to convert the graph indices to vertex indices
+        vertex_indices = []
+        last_graph_id = 0
+        cur_idx = 0
+        for graph_id in graph_ids:
+            for skip_id in range(last_graph_id + 1, graph_id):
+                cur_idx += self.dataset_properties.properties["graph_sizes"][skip_id]
+            num_vertices = self.dataset_properties.properties["graph_sizes"][graph_id]
+            vertex_indices.extend(list(range(cur_idx, cur_idx + num_vertices)))
+            cur_idx += num_vertices
+            last_graph_id = graph_id
+
+        self.split = np.array(vertex_indices, dtype = int)
         self.dataset = self.original_dataset[self.split,:].copy()
         self.metadata["data_split"] = split_prop
         self.num_vertices, self.num_features = self.dataset.shape

@@ -4,34 +4,34 @@ import os.path as osp
 import util
 import constants
 
-output_root_folder = "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\clustering_augmented"
-prev_res_folder = "/home/tobias/bachelorthesis/PartitionEnhancedGNNsTesting/experiments/results"
+output_root_folder = "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\CSL" # "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\augmented_gnn"
+prev_res_folder = "/home/tobias/bachelorthesis/PartitionEnhancedGNNsTesting/experiments/results" # "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\results" # 
 stage = 1 # 0 -> only classical, 1 -> only clustering, 2 -> only enhanced/augmented, 3 -> all stages
 
-k_vals = [3]
-r_vals = [1, 2]
-s_vals = [3, 3]
+k_vals = [3, 10]
+r_vals = [3, 5]
+s_vals = [10, 10]
 vertex_sp = True
 num_reruns = 3
-max_patience = 5
+max_patience = 10
 
-num_clusters = [2, 3, 4]
+num_clusters = [2, 5, 10]
 pca_dims = [0, 10, 30]
 min_cluster_size = [0]
 num_layers = [3, 5]
 num_hidden_channels = [64, 128, 256]
-num_batch_sizes = [32]
+num_batch_sizes = [32, 64]
 num_epochs = [100]
 lrs = [0.01]
 
-dataset = "3-Prox"
+dataset = "CSL"
 models = ["gin", "gcn"]
 # create both models
 # create with and without batch norm for final enhanced gnn version
 # create normalized and non-normalized vertex features
-is_linux = True
-gen_enhanced_gnn = False
-gen_augmented_gnn = True
+is_linux = False
+gen_enhanced_gnn = True
+gen_augmented_gnn = False
 
 feature_type = "sp"
 lo_feature_index = 0
@@ -47,46 +47,46 @@ mbk_max_no_improvement = constants.mbk_max_no_improvement
 mbk_max_iter = constants.mbk_max_iter
 
 
-config = {}
-config["type"] = "experiment"
-config["mode"] = "---   'classical', 'clustering', 'enhanced' or 'full' depending on whether a full model experiment or only a single step should be executed   ---"
-config["title"] = "---   filename of the result (without extension)   ---"
-config["prev_result_path"] = "---   path to a previous result if not classical or full experiment   ---"
-config["general"] = {}
-config["general"]["seed"] = constants.SEED
-config["general"]["num_workers"] = constants.num_workers
-config["general"]["num_reruns"] = constants.num_reruns
-config["general"]["max_patience"] = constants.max_patience
-config["general"]["use_batch_norm"] = constants.use_batch_norm
-config["general"]["num_k_fold"] = constants.num_k_fold
-config["general"]["k_fold_test_ratio"] = constants.k_fold_test_ratio
-config["general"]["mbk_batch_size"] = constants.mbk_batch_size
-config["general"]["mbk_num_init"] = constants.mbk_n_init
-config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
-config["general"]["mbk_max_iter"] = constants.mbk_max_iter
-config["dataset"] = {}
-config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
-config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
-config["dataset"]["use_gpnn"] = False
-config["dataset"]["use_augmented_gnn"] = False
-config["dataset"]["feature_type"] = "---   'sp' or 'lo', only utilised for k-disks or r-s-rings   ---"
-config["dataset"]["lo_feature_idx"] = "---   Index of the Lovasz features that should be utilised, use '0' if only one feature has been generated. Ignored if feature_type is not 'lo'   ---"
-config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
-config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
-config["dataset"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
-config["dataset"]["is_vertex_sp_feature"] = False
-config["dataset"]["normalize_vertex_features"] = False
-config["hyperparameters"] = {}
-config["hyperparameters"]["num_clusters"] = ["---   List of the numbers of clusters that will be evaluated   ---"]
-config["hyperparameters"]["pca_dims"] = ["---   List of the numbers of pca dimensions that will be evaluated. NOTE: values smaller than 1 mean no dimensionality reduction is performed   ---"]
-config["hyperparameters"]["min_cluster_size"] = ["---   List of the minimum sizes of clusters that will be evaluated   ---"]
-config["hyperparameters"]["num_layers"] = ["---   List of the number of layers of gnns that will be evaluated   ---"]
-config["hyperparameters"]["num_hidden_channels"] = ["---   List of the number hidden dimensions of gnns that will be evaluated   ---"]
-config["hyperparameters"]["num_batch_sizes"] = ["---   Defines the batch sizes of gnns while training   ---"]
-config["hyperparameters"]["num_epochs"] = ["---   List of the number of epochs while training gnns that will be evaluated   ---"]
-config["hyperparameters"]["lrs"] = ["---   List of the learning rates that will be evaluated   ---"]
-config["hyperparameters"]["num_gpnn_layer"] = ["---   List of the number of layers of gpnns that will be evaluated   ---"]
-config["hyperparameters"]["gpnn_channels"] = ["---   List of the gpnn feature dimensions that will be evaluated   ---"]
+# config = {}
+# config["type"] = "experiment"
+# config["mode"] = "---   'classical', 'clustering', 'enhanced' or 'full' depending on whether a full model experiment or only a single step should be executed   ---"
+# config["title"] = "---   filename of the result (without extension)   ---"
+# config["prev_result_path"] = "---   path to a previous result if not classical or full experiment   ---"
+# config["general"] = {}
+# config["general"]["seed"] = constants.SEED
+# config["general"]["num_workers"] = constants.num_workers
+# config["general"]["num_reruns"] = constants.num_reruns
+# config["general"]["max_patience"] = constants.max_patience
+# config["general"]["use_batch_norm"] = constants.use_batch_norm
+# config["general"]["num_k_fold"] = constants.num_k_fold
+# config["general"]["k_fold_test_ratio"] = constants.k_fold_test_ratio
+# config["general"]["mbk_batch_size"] = constants.mbk_batch_size
+# config["general"]["mbk_num_init"] = constants.mbk_n_init
+# config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
+# config["general"]["mbk_max_iter"] = constants.mbk_max_iter
+# config["dataset"] = {}
+# config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+# config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
+# config["dataset"]["use_gpnn"] = False
+# config["dataset"]["use_augmented_gnn"] = False
+# config["dataset"]["feature_type"] = "---   'sp' or 'lo', only utilised for k-disks or r-s-rings   ---"
+# config["dataset"]["lo_feature_idx"] = "---   Index of the Lovasz features that should be utilised, use '0' if only one feature has been generated. Ignored if feature_type is not 'lo'   ---"
+# config["dataset"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
+# config["dataset"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+# config["dataset"]["s"] = ["---   List of s values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
+# config["dataset"]["is_vertex_sp_feature"] = False
+# config["dataset"]["normalize_vertex_features"] = False
+# config["hyperparameters"] = {}
+# config["hyperparameters"]["num_clusters"] = ["---   List of the numbers of clusters that will be evaluated   ---"]
+# config["hyperparameters"]["pca_dims"] = ["---   List of the numbers of pca dimensions that will be evaluated. NOTE: values smaller than 1 mean no dimensionality reduction is performed   ---"]
+# config["hyperparameters"]["min_cluster_size"] = ["---   List of the minimum sizes of clusters that will be evaluated   ---"]
+# config["hyperparameters"]["num_layers"] = ["---   List of the number of layers of gnns that will be evaluated   ---"]
+# config["hyperparameters"]["num_hidden_channels"] = ["---   List of the number hidden dimensions of gnns that will be evaluated   ---"]
+# config["hyperparameters"]["num_batch_sizes"] = ["---   Defines the batch sizes of gnns while training   ---"]
+# config["hyperparameters"]["num_epochs"] = ["---   List of the number of epochs while training gnns that will be evaluated   ---"]
+# config["hyperparameters"]["lrs"] = ["---   List of the learning rates that will be evaluated   ---"]
+# config["hyperparameters"]["num_gpnn_layer"] = ["---   List of the number of layers of gpnns that will be evaluated   ---"]
+# config["hyperparameters"]["gpnn_channels"] = ["---   List of the gpnn feature dimensions that will be evaluated   ---"]
 
 # We split into different configs: feature type?, enhanced/augmented gnn?, model?, batchnorm?, for enhanced: num_layers; for clustering: num_clusters, normalize?
 def gen_classical_config():
