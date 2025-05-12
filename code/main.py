@@ -559,6 +559,8 @@ if __name__ == '__main__':
     group.add_argument('-d', '--directory', nargs = '?', help = 'specify path to a directory which will be scanned for config files which will be executed consecutively', type = Path)
     parser.add_argument('-r', '--root_path', nargs = '?', help = 'specify the root directory, if not set will default to the parent directory of the main.py file', type = Path, default = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir))
 
+    parser.add_argument('-rec', '--recursive', help = 'search all subdirectories for files', action = 'store_true')
+
     args = parser.parse_args()
 
     # Required for pytorch version >= 2.6.0 since torch.load weights_only default value was changed from 'False' to 'True'
@@ -586,24 +588,42 @@ if __name__ == '__main__':
         # We need to backup the experiment configs since we need to execute feature generations first
         experiment_configs = []
 
-        for path_idx, path in enumerate(dirlist):
-            if path.endswith('.json'):
-                try:
-                    config = util.read_metadata_file(path = osp.join(args.directory, path))
-                    if "type" in config:
-                        if config["type"] == "experiment":
-                            # Run experiment
-                            experiment_configs.append((config, path_idx))
-                        elif config["type"] == "feature_gen":
-                            # Generate features
-                            run_feature_gen(config = config, root_path = args.root_path)
-                except Exception as e:
-                    print(repr(e))
+        if args.recursive:
+            for root, dirs, files in os.walk(args.directory):
+                for file in files:
+                    if file.endswith('.json'):
+                        try:
+                            config = util.read_metadata_file(path = osp.join(root, file))
+                            if "type" in config:
+                                if config["type"] == "experiment":
+                                    # Run experiment
+                                    experiment_configs.append((config, file))
+                                elif config["type"] == "feature_gen":
+                                    # Generate features
+                                    run_feature_gen(config = config, root_path = args.root_path)
+                        except Exception as e:
+                            print(repr(e))
+        else:
+            for path_idx, path in enumerate(dirlist):
+                if path.endswith('.json'):
+                    try:
+                        config = util.read_metadata_file(path = osp.join(args.directory, path))
+                        if "type" in config:
+                            if config["type"] == "experiment":
+                                # Run experiment
+                                experiment_configs.append((config, path))
+                            elif config["type"] == "feature_gen":
+                                # Generate features
+                                run_feature_gen(config = config, root_path = args.root_path)
+                    except Exception as e:
+                        print(repr(e))
             
         # Run all experiments
-        for idx, (experiment_config, path_idx) in enumerate(experiment_configs):
+        total_num_experiments = len(experiment_configs)
+        print(f"---   Total number of experiment files: {total_num_experiments}   ---")
+        for idx, (experiment_config, path) in enumerate(experiment_configs):
             try:
-                print(f"---   Starting experiment specified in {dirlist[path_idx]}   ---")
+                print(f"---   Starting experiment {idx + 1}/{total_num_experiments} specified in {path}   ---")
                 run_experiment(config = experiment_config, root_path = args.root_path, experiment_idx = idx)
             except Exception as e:
                 print(repr(e))
