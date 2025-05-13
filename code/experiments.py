@@ -103,7 +103,7 @@ class Experiment_Manager():
                           lo_idx_str: str = "", k: Optional[List[int]] = None, r: Optional[List[int]] = None, s: Optional[List[int]] = None, is_vertex_sp_features: bool = False,
                           num_clusters: List[int] = None, pca_dims: List[int] = None, min_cluster_sizes: List[int] = None, num_layers: List[int] = None,
                           hidden_channels: List[int] = None, batch_sizes: List[int] = None, num_epochs: List[int] = None, lrs: List[float] = None, normalize_features: bool = None, exp_mode: int = -1, max_patience: Optional[int] = None,
-                          prev_res_path: Optional[str] = None):
+                          prev_res_path: Optional[str] = None, pre_transform = None):
 
         self.gnn = GNN_Manager()
 
@@ -129,6 +129,8 @@ class Experiment_Manager():
         self.use_gpnn = use_gpnn
         self.gpnn_layers = gpnn_layers
         self.gpnn_channels = gpnn_channels
+
+        self.pre_transform = pre_transform
 
         if max_patience is not None:
             self.max_patience = max_patience
@@ -188,7 +190,7 @@ class Experiment_Manager():
             elif exp_mode == 3: # full
                 self.run_experiments = self.run_ogb_experiments
             self.criterion = torch.nn.BCEWithLogitsLoss()
-        elif dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'CSL']:
+        elif dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB', 'CSL']:
             if dataset_str == 'CSL':
                 self.dataset_path = osp.join('data', 'CSL', 'CSL_dataset')
             elif dataset_str == 'PROTEINS':
@@ -199,6 +201,8 @@ class Experiment_Manager():
                 self.dataset_path = osp.join('data', 'TU', 'NCI1')
             elif dataset_str == 'DD':
                 self.dataset_path = osp.join('data', 'TU', 'DD')
+            elif dataset_str == 'COLLAB':
+                self.dataset_path = osp.join('data', 'TU', 'COLLAB')
 
             if exp_mode == 0: # classical
                 self.run_experiments = self.run_classical_csl_prox_experiments
@@ -323,15 +327,15 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
-        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB']:
             # TU dataset
-            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False, pre_transform = self.pre_transform)
             splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
         if self.dataset_str == 'CSL':
-            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
-            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
 
         # Optimize GNN hyperparameters without clustering first
@@ -480,15 +484,15 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
-        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB']:
             # TU dataset
-            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False, pre_transform = self.pre_transform)
             splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
         elif self.dataset_str == 'CSL':
-            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
-            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
 
 
@@ -661,15 +665,15 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
-        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB']:
             # TU dataset
-            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False, pre_transform = self.pre_transform)
             splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
         elif self.dataset_str == 'CSL':
-            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
-            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
 
         print('---   Running hyperparameter optimization for enhanced GNN   ---')
@@ -1824,15 +1828,15 @@ class Experiment_Manager():
 
         loss_func = F.cross_entropy
 
-        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+        if self.dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB']:
             # TU dataset
-            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+            dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False, pre_transform = self.pre_transform)
             splits = util.generate_tu_splits(dataset = dataset, dataset_path = self.dataset_path, root_path = self.root_path)
         elif self.dataset_str == 'CSL':
-            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
         elif self.dataset_str.endswith('-Prox'):
-            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
             splits = dataset.gen_data_splits()
 
         # Optimize GNN hyperparameters without clustering first
@@ -2042,11 +2046,11 @@ class Experiment_Manager():
 
                             # Will be overwritten if training enhanced gnn hyperparameters
                             if self.dataset_str == 'CSL':
-                                dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
                             elif self.dataset_str.endswith('-Prox'):
-                                dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
                             else:
-                                dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False)
+                                dataset = TUDataset(name = self.dataset_str, root = osp.join(self.root_path, self.dataset_path), use_node_attr = False, pre_transform = self.pre_transform)
 
                             data["experiment_idx"][cur_experiment_idx] = {}
                             data["experiment_idx"][cur_experiment_idx]["avg_val_acc"] = -1.0
@@ -2120,11 +2124,11 @@ class Experiment_Manager():
                                 # Enhance the dataset with clustering_ids (using the previously computed information regarding the folds)
                                 if not classic_gnn:
                                     if self.dataset_str == 'CSL':
-                                        dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                        dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
                                     elif self.dataset_str.endswith('-Prox'):
-                                        dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                        dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
                                     else:
-                                        dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
+                                        dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False, pre_transform = self.pre_transform)
                                     feature_metadata_path = best_vertex_feature_metadata_path
                                     if idx in best_clustering_paths:
                                         dataset, _ = gnn_utils.include_cluster_id_feature_transform(dataset = dataset, absolute_path_prefix = self.root_path, vertex_feature_metadata_path = feature_metadata_path, cluster_metadata_path = best_clustering_paths[idx])
@@ -2449,11 +2453,11 @@ class Experiment_Manager():
                                     experiment_start = time.time()
 
                                     if self.dataset_str == 'CSL':
-                                        dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                        dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
                                     elif self.dataset_str.endswith('-Prox'):
-                                        dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                        dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
                                     else:
-                                        dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
+                                        dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False, pre_transform = self.pre_transform)
 
                                     vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
                                     # set up clusterer
@@ -2579,11 +2583,11 @@ class Experiment_Manager():
 
                                         # Create a new dataset enhanced with cluster_ids for GNN training
                                         if self.dataset_str == 'CSL':
-                                            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                            dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
                                         elif self.dataset_str.endswith('-Prox'):
-                                            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                            dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
                                         else:
-                                            dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
+                                            dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False, pre_transform = self.pre_transform)
                                         dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_dataset = clusterer.original_dataset, cluster_metadata = cluster_metadata)
                                         # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
                                         avg_time_enhance_cluster_id += add_cluster_id_time
@@ -2658,11 +2662,11 @@ class Experiment_Manager():
                             experiment_start = time.time()
 
                             if self.dataset_str == 'CSL':
-                                dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
                             elif self.dataset_str.endswith('-Prox'):
-                                dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
                             else:
-                                dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
+                                dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False, pre_transform = self.pre_transform)
 
                             vertex_feature_metadata = util.read_metadata_file(osp.join(self.root_path, vertex_feature_path, metadata_filenames[path_idx]))
                             # set up clusterer
@@ -2790,11 +2794,11 @@ class Experiment_Manager():
 
                                 # Create a new dataset enhanced with cluster_ids for GNN training
                                 if self.dataset_str == 'CSL':
-                                    dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path))
+                                    dataset = CSL_Dataset(root = osp.join(self.root_path, self.dataset_path), pre_transform = self.pre_transform)
                                 elif self.dataset_str.endswith('-Prox'):
-                                    dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h)
+                                    dataset = ProximityDataset(root = osp.join(self.root_path, self.dataset_path), h = self.h, pre_transform = self.pre_transform)
                                 else:
-                                    dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False)
+                                    dataset = TUDataset(root = osp.join(self.root_path, self.dataset_path), name = self.dataset_str, use_node_attr = False, pre_transform = self.pre_transform)
                                 dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_dataset = clusterer.original_dataset, cluster_metadata = cluster_metadata)
                                 # dataset, add_cluster_id_time = gnn_utils.include_cluster_id_feature_transform(absolute_path_prefix = self.root_path, dataset = dataset, feature_metadata = vertex_feature_metadata, cluster_metadata = cluster_metadata)
                                 avg_time_enhance_cluster_id += add_cluster_id_time

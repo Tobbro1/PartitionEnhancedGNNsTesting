@@ -14,7 +14,7 @@ from torch_geometric.data.data import DataEdgeAttr, DataTensorAttr
 from torch_geometric.data.storage import GlobalStorage
 
 from experiments import Experiment_Manager
-from vertex_partition_feature_generation_main import run_csl, run_proximity, run_molhiv, run_ppa, run_tu_dataset
+from vertex_partition_feature_generation_main import run_csl, run_proximity, run_molhiv, run_ppa, run_tu_dataset, UnlabeledPreTranform
 
 # Defines an example config file for a run and creates it
 def gen_experiment_config_file(root_path: str) -> None:
@@ -39,7 +39,7 @@ def gen_experiment_config_file(root_path: str) -> None:
     config["general"]["mbk_max_no_improvement"] = constants.mbk_max_no_improvement
     config["general"]["mbk_max_iter"] = constants.mbk_max_iter
     config["dataset"] = {}
-    config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["base_model"] = "---   'gin' or 'gcn'   ---"
     config["dataset"]["use_gpnn"] = False
     config["dataset"]["use_augmented_gnn"] = False
@@ -99,6 +99,8 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     gpnn_layers = []
 
     prev_result_path = None
+
+    pre_transform = None
 
     # config["general"]["mbk_batch_size"] = constants.mbk_batch_size
     # config["general"]["mbk_num_init"] = constants.mbk_n_init
@@ -176,7 +178,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
     for key, value in config["dataset"].items():
         if key == "dataset_str":
             assert isinstance(value, str)
-            if value in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL']:
+            if value in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB', 'ogbg-molhiv', 'ogbg-ppa', 'CSL']:
                 dataset_str = value
             elif value.endswith('-Prox'):
                 h = int(value[0])
@@ -287,6 +289,9 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
         else:
             raise ValueError(f'Invalid key {key} in config["hyperparameters"]')
         
+    # Add pre transform if necessary
+    if dataset_str == 'COLLAB':
+        pre_transform = UnlabeledPreTranform()
 
     util.initialize_random_seeds(constants.SEED)
 
@@ -297,7 +302,7 @@ def run_experiment(config: Dict, root_path: str, experiment_idx: int) -> None:
                                   is_lovasz_feature = is_lovasz_feature, k = k, r = r, s = s, is_vertex_sp_features = is_vertex_sp_features, num_clusters = num_clusters,
                                     pca_dims = pca_dims, min_cluster_sizes = min_cluster_sizes, num_layers = num_layers, hidden_channels = hidden_channels, batch_sizes = batch_sizes,
                                     num_epochs = num_epochs, lrs = lrs, normalize_features = normalize, exp_mode = exp_mode, max_patience = constants.max_patience, lo_idx_str = lo_idx_str,
-                                    prev_res_path = prev_result_path)
+                                    prev_res_path = prev_result_path, pre_transform = pre_transform)
         
         manager.run_experiments()
 
@@ -335,7 +340,7 @@ def gen_feature_gen_config_file(root_path: str) -> None:
     config["general"]["vector_buffer_size"] = constants.vector_buffer_size
     config["general"]["num_lo_gen"] = constants.num_lo_gens
     config["dataset"] = {}
-    config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
+    config["dataset"]["dataset_str"] = "---   'NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB', 'ogbg-molhiv', 'ogbg-ppa', 'CSL' or 'h-Prox' with h = 1,3,5,8,10   ---"
     config["dataset"]["sp"] = {}
     config["dataset"]["sp"]["k"] = ["---   List of k values for k-disks that should be evaluated   ---"]
     config["dataset"]["sp"]["r"] = ["---   List of r values for r-s-rings that should be evaluated. NOTE: r[idx]-s[idx]-rings will be evaluated   ---"]
@@ -405,7 +410,7 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
     for key, value in config["dataset"].items():
         if key == "dataset_str":
             assert isinstance(value, str)
-            if value in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'ogbg-molhiv', 'ogbg-ppa', 'CSL']:
+            if value in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB', 'ogbg-molhiv', 'ogbg-ppa', 'CSL']:
                 dataset_str = value
             elif value.endswith('-Prox'):
                 h = int(value[0])
@@ -494,7 +499,7 @@ def run_feature_gen(config: Dict, root_path: str) -> None:
 
     util.initialize_random_seeds(constants.SEED)
 
-    if dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD']:
+    if dataset_str in ['NCI1', 'ENZYMES', 'PROTEINS', 'DD', 'COLLAB']:
         run_tu_dataset(dataset_str = dataset_str, sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)
     elif dataset_str == 'ogbg-molhiv':
         run_molhiv(sp_k_vals = sp_k, sp_r_vals = sp_r, sp_s_vals = sp_s, lo_k_vals = lo_k, lo_r_vals = lo_r, lo_s_vals = lo_s, lo_graph_sizes_range = lo_graph_sizes_range, lo_num_samples = lo_num_samples, gen_vertex_sp_features = gen_vertex_sp_features, root_path = root_path, use_editmask = False, re_gen_properties = re_gen_properties)

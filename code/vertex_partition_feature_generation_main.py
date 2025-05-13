@@ -200,12 +200,21 @@ import matplotlib.pyplot as plt
 #     time_multi = (time.time_ns() - ts_multi) / 1_000_000
 #     print('Multi threaded time: ' + str(time_multi))
 
+class UnlabeledPreTranform():
+    def __init__(self):
+        pass
+
+    def __call__(self, data: Data) -> Data:
+        data.x = torch.zeros(size = (data.num_nodes,1), dtype = torch.long)
+        return data
+
+
 def run_exp():
     raise NotImplementedError
 
 def run_tu_dataset(dataset_str: str, sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]] = None, sp_s_vals: Optional[List[int]] = None, lo_k_vals: Optional[List[int]] = None, lo_r_vals: Optional[List[int]] = None, lo_s_vals: Optional[List[int]] = None, lo_graph_sizes_range: Optional[Tuple[int,int]] = None, lo_num_samples: Optional[Tuple[int,int]] = None, gen_vertex_sp_features: bool = False, root_path: Optional[str] = None, use_editmask: bool = False, re_gen_properties: bool = False) -> None:
     
-    assert dataset_str in ["NCI1", "ENZYMES", "PROTEINS", "DD"]
+    assert dataset_str in ["NCI1", "ENZYMES", "PROTEINS", "DD", "COLLAB"]
     
     if root_path is None:
         root_path = osp.join(osp.abspath(osp.dirname(__file__)), os.pardir)
@@ -222,7 +231,21 @@ def run_tu_dataset(dataset_str: str, sp_k_vals: Optional[List[int]] = None, sp_r
     editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
 
     # Perhaps distinguish between datasets for use_node_attr
-    dataset = TUDataset(name = dataset_str, root = osp.join(absolute_path_prefix, path), use_node_attr = False)
+    if dataset_str == 'COLLAB':
+        dataset = TUDataset(name = dataset_str, root = osp.join(absolute_path_prefix, path), use_node_attr = False, pre_transform = UnlabeledPreTranform())
+    else:
+        dataset = TUDataset(name = dataset_str, root = osp.join(absolute_path_prefix, path), use_node_attr = False)
+
+        # # Add labels
+        # total_num_vertices = 0
+        # for idx in range(dataset.len()):
+        #     graph = dataset.get(idx)
+        #     num_vertices = graph.size(0)
+        #     total_num_vertices += num_vertices
+        #     dataset.get(idx).x = torch.zeros(size = (num_vertices,), dtype = torch.long)
+        # dataset._x = torch.zeros(size = (total_num_vertices,), dtype = torch.long)
+        # dataset.x = torch.zeros(size = (total_num_vertices,), dtype = torch.long)
+        # dataset._data_list = None
 
     output_path = osp.join(path, 'results')
     dataset_prop_filename = "properties.json"

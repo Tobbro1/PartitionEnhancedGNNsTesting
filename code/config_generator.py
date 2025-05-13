@@ -4,18 +4,18 @@ import os.path as osp
 import util
 import constants
 
-output_root_folder = "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\NCI1" # "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\augmented_gnn"
-prev_res_folder = "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\results" # "/home/tobias/bachelorthesis/PartitionEnhancedGNNsTesting/experiments/results" #  # 
+output_root_folder = "E:\\CopyToOtherPC\\experiments\\configs\\COLLAB" # "E:\\CopyToOtherPC\\experiments\\configs\\3-Prox\\augmented_gnn"
+prev_res_folder = "/home/tobias/bachelorthesis/PartitionEnhancedGNNsTesting/experiments/results" # "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\results" #  #  # 
 stage = 2 # 0 -> only classical, 1 -> only clustering, 2 -> only enhanced/augmented, 3 -> all stages
 
-k_vals = [3, 5]
-r_vals = [3, 3]
-s_vals = [5, 10]
+k_vals = [2]
+r_vals = [1, 2]
+s_vals = [2, 2]
 vertex_sp = True
 num_reruns = 3
 max_patience = 5
 
-num_clusters = [2, 3, 4, 10, 20]
+num_clusters = [2, 3, 5, 10, 20]
 pca_dims = [0, 10, 30]
 min_cluster_size = [0]
 num_layers = [3, 5]
@@ -24,12 +24,12 @@ num_batch_sizes = [32]
 num_epochs = [100]
 lrs = [0.01]
 
-dataset = "NCI1"
+dataset = "COLLAB"
 models = ["gin", "gcn"]
 # create both models
 # create with and without batch norm for final enhanced gnn version
 # create normalized and non-normalized vertex features
-is_linux = False
+is_linux = True
 gen_enhanced_gnn = False
 gen_augmented_gnn = True
 
