@@ -413,7 +413,7 @@ class Partition_enhanced_GCN(torch.nn.Module):
                 self.convs.append(conv)
 
                 if self.use_batch_norm:
-                    batch_norm = BatchNorm(in_channels = hidden_channels)
+                    batch_norm = BatchNorm(in_channels = hidden_channels, allow_single_element = True)
                     self.norm_convs.append(batch_norm)
                     convs_p.append(batch_norm)
 
