@@ -388,13 +388,13 @@ def run_ppa(sp_k_vals: Optional[List[int]] = None, sp_r_vals: Optional[List[int]
     result_mmap_path = osp.join(root_path, path, 'results.np')
     editmask_mmap_path = osp.join(root_path, path, 'editmask.np')
 
-    dataset_ppa = PygGraphPropPredDataset(name = 'ogbg-ppa', root = osp.join(absolute_path_prefix, path))
+    dataset_ppa = PygGraphPropPredDataset(name = 'ogbg-ppa', root = osp.join(absolute_path_prefix, path), pre_transform = UnlabeledPreTranform())
 
-    # Remove features
-    dataset_ppa._data.x = torch.zeros((dataset_ppa._data.x.size()[0], 1), dtype = torch.long)
-    if dataset_ppa._data_list is not None:
-        for data in dataset_ppa._data_list:
-            data.x = torch.zeros((data.num_nodes, 1), dtype = torch.long)
+    # # Remove features
+    # dataset_ppa._data.x = torch.zeros((dataset_ppa._data.x.size()[0], 1), dtype = torch.long)
+    # if dataset_ppa._data_list is not None:
+    #     for data in dataset_ppa._data_list:
+    #         data.x = torch.zeros((data.num_nodes, 1), dtype = torch.long)
 
     output_path = osp.join(path, 'results')
     dataset_prop_filename = "properties.json"

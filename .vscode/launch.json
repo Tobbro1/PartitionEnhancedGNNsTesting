@@ -32,7 +32,7 @@
                 "-r",
                 "E:\\workspace\\PartitionEnhancedGNNsTesting",
                 "-f",
-                "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\COLLAB_feature_gen.json"
+                "E:\\workspace\\PartitionEnhancedGNNsTesting\\experiments\\configs\\testing_feature_gen.json"
             ]
         }
     ]

@@ -200,6 +200,18 @@ def read_pickle(path: str):
 
     return res
 
+def write_txt(path: str, filename: str, text: str) -> None:
+    if not osp.exists(path):
+        os.makedirs(path)
+
+    path = osp.join(path, filename)
+    if not osp.exists(path):
+        open(path, 'w').close()
+
+    with open(path, 'w') as file:
+        file.write(text)
+    
+
 def generate_tu_splits(root_path: str, dataset_path: str, dataset: Dataset, split_path: Optional[str] = None):
     splits = {}
 
