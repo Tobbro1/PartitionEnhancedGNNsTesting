@@ -10,19 +10,28 @@ from torch import Tensor
 #Utilises the networkx draw function to draw a given torch_geometric data object with matplotlib
 #NOTE: if labels are set and not 1-dimensional, it is assumed to be a one-hot-encoding.
 #NOTE: utilising the networkx draw functionality is generally disencouraged
-def drawGraph(graph: Data, vertex_select: Optional[List[int]] = None, figure_count: int=1, draw_labels: bool=True, labels: Optional[Tensor] = None):
+def drawGraph(graph: Data | nx.Graph, vertex_select: Optional[List[int]] = None, figure_count: int=1, draw_labels: bool=True, labels: Optional[Tensor] = None, pos = None, vertex_colors = None):
 
-    _graph_vis = torch_geometric.utils.to_networkx(graph, to_undirected=True)
-    _graph_colors=['yellow' for _ in _graph_vis.nodes()]
+    if isinstance(graph, nx.Graph):
+        _graph_vis = nx.to_undirected(graph)
+    elif isinstance(graph, Data):
+        _graph_vis = torch_geometric.utils.to_networkx(graph, to_undirected=True)
+    else:
+        raise ValueError("drawGraph: invalid graph type")
 
-    if vertex_select is not None:
-        for j in vertex_select:
-            _graph_colors[j]='green'
+    if vertex_colors is not None:
+        _graph_colors = vertex_colors
+    else:
+        _graph_colors=['yellow' for _ in _graph_vis.nodes()]
+
+        if vertex_select is not None:
+            for j in vertex_select:
+                _graph_colors[j]='green'
 
     plt.figure(figure_count)
 
     if labels is None:
-        nx.draw(_graph_vis, node_color=_graph_colors, with_labels=draw_labels)
+        nx.draw(_graph_vis, node_color=_graph_colors, with_labels=draw_labels, pos = pos)
     else:
         #determines whether the feature dimension is larger than 1 => it is assumed to be a one-hot encoding in this case
         if labels.dim() > 1:

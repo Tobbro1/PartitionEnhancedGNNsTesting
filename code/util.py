@@ -159,7 +159,7 @@ def write_metadata_file(path: str, filename: str, data) -> None:
     with open(path, "w") as file:
         file.write(json.dumps(data, indent=4))
 
-def write_numpy_txt(path: str, filename: str, data: np.array, comment: Optional[str]) -> None:
+def write_numpy_txt(path: str, filename: str, data: np.array, comment: Optional[str], format = None) -> None:
     if comment is None:
         comment = ""
 
@@ -171,14 +171,20 @@ def write_numpy_txt(path: str, filename: str, data: np.array, comment: Optional[
         open(path, 'w').close()
 
     with open(path, "w") as file:
-        np.savetxt(fname = file, X = data, comments = '#', header = comment)
+        if format is None:
+            np.savetxt(fname = file, X = data, comments = '#', header = comment)
+        else:
+            np.savetxt(fname = file, X = data, comments = '#', header = comment, fmt = format)
 
-def read_numpy_txt(path: str) -> np.array:
+def read_numpy_txt(path: str, dtype = None) -> np.array:
 
     if not osp.exists(path):
         raise FileNotFoundError
     
-    return np.loadtxt(fname = path, dtype = np.float64, comments = '#')
+    if dtype is None:
+        return np.loadtxt(fname = path, dtype = np.float64, comments = '#')
+    else:
+        return np.loadtxt(fname = path, dtype = dtype, comments = '#')
 
 def write_pickle(path: str, filename: str, obj) -> None:
     if not osp.exists(path):
